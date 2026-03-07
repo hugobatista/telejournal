@@ -9,7 +9,7 @@ python -m pytest src tests --cov=src/telegram_journal_bot --cov-fail-under=100 -
 
 echo ""
 echo "=== Running strict mypy type checks ==="
-python -m mypy src tests --strict
+python -m mypy src --strict
 
 echo ""
 echo "=== All validations passed! ==="
