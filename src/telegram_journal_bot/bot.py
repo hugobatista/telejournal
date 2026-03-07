@@ -55,7 +55,7 @@ MOOD_LABELS = {
     5: "😊",
 }
 
-TAG_CHOICES = ["journal", "work", "personal", "family", "health"]
+TAG_CHOICES = [ "personal", "family", "health", "love", "hobby", "other", "finance", "social"]
 
 
 def _mood_keyboard() -> InlineKeyboardMarkup:

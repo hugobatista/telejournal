@@ -5,7 +5,7 @@ description = "Telegram bot that journals private messages into an Obsidian vaul
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "python-telegram-bot>=21.0",
+    "python-telegram-bot[job-queue]>=21.0",
     "python-dotenv>=1.0",
     "PyYAML>=6.0",
     "aiofiles>=24.0",
