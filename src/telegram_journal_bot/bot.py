@@ -39,6 +39,7 @@ LOGGER = logging.getLogger(__name__)
 OVERRIDE_DATE_KEY = "override_date"
 LAST_ENTRY_AT_KEY = "last_entry_at"
 LAST_PROMPT_AT_KEY = "last_prompt_at"
+LAST_PROMPT_NOTE_KEY = "last_prompt_note"
 ALBUMS_KEY = "albums"
 ACTIVE_CHATS_KEY = "active_chats"
 
@@ -55,7 +56,41 @@ MOOD_LABELS = {
     5: "😊",
 }
 
-TAG_CHOICES = [ "personal", "family", "health", "love", "hobby", "other", "finance", "social"]
+TAG_CHOICES = ["family", "health", "love", "hobby", "other", "finance", "social"]
+
+
+def _parse_tags_from_args(args: list[str]) -> set[str]:
+    """Parse tag names from /tags command args, supporting commas and spaces."""
+    parsed: set[str] = set()
+    for raw in args:
+        for part in raw.split(","):
+            tag = part.strip().lower()
+            if tag:
+                parsed.add(tag)
+    return parsed
+
+
+def _extract_mood_value(raw_mood: Any) -> int | None:
+    """Extract current mood value from legacy or current frontmatter shapes."""
+    if raw_mood is None:
+        return None
+
+    if isinstance(raw_mood, int) and raw_mood in MOOD_LABELS:
+        return raw_mood
+
+    if isinstance(raw_mood, dict):
+        value = raw_mood.get("value")
+        if isinstance(value, int) and value in MOOD_LABELS:
+            return value
+
+    if isinstance(raw_mood, list):
+        for item in reversed(raw_mood):
+            if isinstance(item, dict):
+                value = item.get("value")
+                if isinstance(value, int) and value in MOOD_LABELS:
+                    return value
+
+    return None
 
 
 def _mood_keyboard() -> InlineKeyboardMarkup:
@@ -69,23 +104,27 @@ def _mood_keyboard() -> InlineKeyboardMarkup:
 
 def _tags_keyboard(current_tags: set[str]) -> InlineKeyboardMarkup:
     """Build inline keyboard for tags add/remove interactions."""
-    buttons: list[InlineKeyboardButton] = []
+    buttons: list[list[InlineKeyboardButton]] = []
     for tag in TAG_CHOICES:
         if tag in current_tags:
             buttons.append(
-                InlineKeyboardButton(
-                    f"-{tag}",
-                    callback_data=f"{TAG_CALLBACK_PREFIX}remove:{tag}",
-                )
+                [
+                    InlineKeyboardButton(
+                        f"✅ {tag}",
+                        callback_data=f"{TAG_CALLBACK_PREFIX}remove:{tag}",
+                    )
+                ]
             )
         else:
             buttons.append(
-                InlineKeyboardButton(
-                    f"+{tag}",
-                    callback_data=f"{TAG_CALLBACK_PREFIX}add:{tag}",
-                )
+                [
+                    InlineKeyboardButton(
+                        f"➕ {tag}",
+                        callback_data=f"{TAG_CALLBACK_PREFIX}add:{tag}",
+                    )
+                ]
             )
-    return InlineKeyboardMarkup([buttons])
+    return InlineKeyboardMarkup(buttons)
 
 
 class JournalBot:
@@ -161,8 +200,9 @@ class JournalBot:
             "• Mood tracked via /mood (😢 😐 😌 🙂 😊)\n\n"
             "/setdate 2026-03-07 [HH:MM:SS]\n"
             "/resetdate\n"
-            "/tags\n"
+            "/tags [tag ...]\n"
             "/mood\n"
+            "/delete\n"
             "/help"
         )
 
@@ -211,6 +251,29 @@ class JournalBot:
         if update.effective_message:
             await update.effective_message.reply_text("Date override reset.")
 
+    async def delete_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Delete the last journal entry for the current effective note date."""
+        if not self._is_private_and_authorized(update):
+            return
+
+        chat_data = self._chat_data(context)
+        note_dt = effective_note_datetime(
+            chat_data.get(OVERRIDE_DATE_KEY),
+            datetime.now(UTC),
+        )
+        deleted = await self._repository.delete_last_entry(note_dt)
+
+        if not update.effective_message:
+            return
+        if deleted is None:
+            await update.effective_message.reply_text("No entries to delete.")
+            return
+        await update.effective_message.reply_text("🗑️ Deleted last entry.")
+
     async def mood_command(
         self,
         update: Update,
@@ -232,7 +295,7 @@ class JournalBot:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Display current tags and inline controls to mutate tags."""
+        """Display tags keyboard or add tags directly from command args."""
         if not self._is_private_and_authorized(update):
             return
 
@@ -244,10 +307,25 @@ class JournalBot:
         frontmatter = await self._repository.get_note_frontmatter(note_dt)
         current_tags = set(frontmatter.get("tags") or ["journal"])
 
+        args = context.args or []
+        if args:
+            parsed_tags = _parse_tags_from_args(args)
+            if parsed_tags:
+                current_tags.update(parsed_tags)
+                await self._repository.update_frontmatter(
+                    note_dt,
+                    {"tags": sorted(current_tags)},
+                )
+
         rendered_tags = ", ".join(sorted(current_tags))
         if update.effective_message:
+            response = (
+                f"Updated: {rendered_tags}"
+                if args
+                else f"Current: {rendered_tags}"
+            )
             await update.effective_message.reply_text(
-                f"Current: {rendered_tags}",
+                response,
                 reply_markup=_tags_keyboard(current_tags),
             )
 
@@ -266,11 +344,11 @@ class JournalBot:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
-    ) -> None:
+    ) -> bool:
         """Persist a photo and append embed entry in note."""
         message = update.effective_message
         if not message or not message.photo:
-            return
+            return False
 
         ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         best_photo = message.photo[-1]
@@ -296,7 +374,7 @@ class JournalBot:
 
             chat_id = self._chat_id(update)
             if chat_id is None:
-                return
+                return False
             job_name = f"{ALBUM_JOB_PREFIX}:{chat_id}:{media_group_id}"
             if context.job_queue is not None:
                 if not context.job_queue.get_jobs_by_name(job_name):
@@ -306,17 +384,18 @@ class JournalBot:
                         data={"chat_id": chat_id, "media_group_id": media_group_id},
                         name=job_name,
                     )
-            return
+            return False
 
         heading = (
             format_text_entry(note_dt, caption)
             if caption
-            else note_dt.strftime("%H:%M")
+            else format_text_entry(note_dt, "Photo")
         )
         entry = f"{heading}\n![[{attachment_rel}]]"
 
         chat_data = self._chat_data(context)
         await self._record_entry(chat_data, note_dt, entry)
+        return True
 
     async def flush_album_entry(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Flush a buffered album to a single note entry."""
@@ -350,11 +429,12 @@ class JournalBot:
         heading = (
             format_text_entry(note_dt, caption)
             if caption
-            else note_dt.strftime("%H:%M")
+            else format_text_entry(note_dt, "Photo album")
         )
         entry = "\n".join([heading, *images])
         try:
             await self._record_entry(chat_data, note_dt, entry)
+            await context.bot.send_message(chat_id, "✅ Added to journal.")
         except OSError:
             LOGGER.exception(
                 "Vault write failed while flushing album for chat_id=%s",
@@ -384,6 +464,39 @@ class JournalBot:
         chat_data = self._chat_data(context)
         await self._record_entry(chat_data, note_dt, entry)
 
+    async def _prompt_for_mood_if_missing(
+        self,
+        message: Any,
+        chat_data: dict[str, Any],
+        note_dt: datetime,
+        now: datetime,
+    ) -> None:
+        """Prompt for mood when note has entries and still no mood for the day."""
+        note_key = note_dt.strftime("%Y-%m-%d")
+        last_prompted_at = chat_data.get(LAST_PROMPT_AT_KEY)
+        if chat_data.get(LAST_PROMPT_NOTE_KEY) != note_key:
+            last_prompted_at = None
+
+        note_has_entry = await self._repository.note_has_entry(note_dt)
+        note_has_mood = await self._repository.note_has_mood(note_dt)
+        should_prompt = should_prompt_for_mood(
+            note_has_entry=note_has_entry,
+            note_has_mood=note_has_mood,
+            last_entry_at=None,
+            now=now,
+            last_prompted_at=last_prompted_at,
+            reminder_interval_hours=4,
+        )
+        if not should_prompt:
+            return
+
+        await message.reply_text(
+            "How are you feeling today?",
+            reply_markup=_mood_keyboard(),
+        )
+        chat_data[LAST_PROMPT_AT_KEY] = now
+        chat_data[LAST_PROMPT_NOTE_KEY] = note_key
+
     async def handle_journal_entry(
         self,
         update: Update,
@@ -408,10 +521,11 @@ class JournalBot:
             chat_data.get(OVERRIDE_DATE_KEY),
             now,
         )
+        wrote_entry = False
 
         try:
             if message.photo:
-                await self._handle_photo(update, context, note_dt)
+                wrote_entry = await self._handle_photo(update, context, note_dt)
             elif message.location:
                 await self._handle_location(
                     context,
@@ -419,9 +533,11 @@ class JournalBot:
                     message.location.latitude,
                     message.location.longitude,
                 )
+                wrote_entry = True
             elif message.text:
                 text = render_message_markdown(message)
                 await self._handle_text(text, context, note_dt)
+                wrote_entry = True
         except OSError:
             LOGGER.exception("Vault write failed")
             await self._safe_user_error(
@@ -429,6 +545,10 @@ class JournalBot:
                 "❌ Vault write failed. Check VAULT_ROOT permissions.",
             )
             return
+
+        if wrote_entry:
+            await message.reply_text("✅ Added to journal.")
+            await self._prompt_for_mood_if_missing(message, chat_data, note_dt, now)
 
         LOGGER.info(
             "Entry written for chat_id=%s date=%s",
@@ -466,8 +586,28 @@ class JournalBot:
 
             if mood not in MOOD_LABELS:
                 return
+
+            frontmatter = await self._repository.get_note_frontmatter(note_dt)
+            previous = _extract_mood_value(frontmatter.get("mood"))
+
             await self._repository.update_frontmatter(note_dt, {"mood": mood})
+
+            if previous != mood:
+                if isinstance(previous, int) and previous in MOOD_LABELS:
+                    change_text = (
+                        f"Mood changed {MOOD_LABELS[previous]} ({previous}/5)"
+                        f" -> {MOOD_LABELS[mood]} ({mood}/5)"
+                    )
+                else:
+                    change_text = f"Mood set to {MOOD_LABELS[mood]} ({mood}/5)"
+                await self._record_entry(
+                    chat_data,
+                    note_dt,
+                    format_text_entry(note_dt, change_text),
+                )
+
             chat_data[LAST_PROMPT_AT_KEY] = datetime.now(UTC)
+            chat_data[LAST_PROMPT_NOTE_KEY] = note_dt.strftime("%Y-%m-%d")
             await query.edit_message_text(
                 f"Mood saved: {MOOD_LABELS.get(mood, str(mood))} ({mood}/5)"
             )
@@ -493,7 +633,7 @@ class JournalBot:
             )
 
     async def check_mood_timers(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Periodic task to send mood prompts after inactivity threshold."""
+        """Periodic task to prompt mood when today's note still has no mood."""
         now = datetime.now(UTC)
         active_chats = self._get_active_chats(context)
         for chat_id in list(active_chats):
@@ -503,19 +643,20 @@ class JournalBot:
             chat_data = raw_chat_data
 
             note_dt = effective_note_datetime(chat_data.get(OVERRIDE_DATE_KEY), now)
+            note_key = note_dt.strftime("%Y-%m-%d")
             note_has_entry = await self._repository.note_has_entry(note_dt)
             note_has_mood = await self._repository.note_has_mood(note_dt)
 
-            last_entry_at = chat_data.get(LAST_ENTRY_AT_KEY)
-            if not isinstance(last_entry_at, datetime):
-                last_entry_at = await self._repository.get_last_entry_time(note_dt)
+            last_prompted_at = chat_data.get(LAST_PROMPT_AT_KEY)
+            if chat_data.get(LAST_PROMPT_NOTE_KEY) != note_key:
+                last_prompted_at = None
 
             should_prompt = should_prompt_for_mood(
                 note_has_entry=note_has_entry,
                 note_has_mood=note_has_mood,
-                last_entry_at=last_entry_at,
+                last_entry_at=None,
                 now=now,
-                last_prompted_at=chat_data.get(LAST_PROMPT_AT_KEY),
+                last_prompted_at=last_prompted_at,
                 reminder_interval_hours=4,
             )
             if not should_prompt:
@@ -527,6 +668,7 @@ class JournalBot:
                 reply_markup=_mood_keyboard(),
             )
             chat_data[LAST_PROMPT_AT_KEY] = now
+            chat_data[LAST_PROMPT_NOTE_KEY] = note_key
 
     async def handle_error(
         self,
@@ -547,7 +689,11 @@ class JournalBot:
 
     def register_handlers(self, application: Application) -> None:  # type: ignore[type-arg]
         """Register bot command, callback, and message handlers."""
-        text_filter = filters.TEXT & (~filters.COMMAND) & filters.ChatType.PRIVATE
+        text_filter = (
+            filters.TEXT
+            & (~filters.COMMAND)
+            & filters.ChatType.PRIVATE
+        )
         photo_filter = filters.PHOTO & filters.ChatType.PRIVATE
         location_filter = filters.LOCATION & filters.ChatType.PRIVATE
 
@@ -561,6 +707,7 @@ class JournalBot:
         application.add_handler(CommandHandler("resetdate", self.resetdate_command))
         application.add_handler(CommandHandler("tags", self.tags_command))
         application.add_handler(CommandHandler("mood", self.mood_command))
+        application.add_handler(CommandHandler("delete", self.delete_command))
         application.add_handler(CommandHandler("help", self.help_command))
 
         application.add_handler(CallbackQueryHandler(self.callback_router))

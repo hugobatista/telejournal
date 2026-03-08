@@ -59,8 +59,11 @@ def journal_bot(tmp_path: Path) -> JournalBot:
     bot = JournalBot(Settings("token", tmp_path))
     bot._repository = SimpleNamespace(  # type: ignore[assignment]
         append_entry=AsyncMock(),
+        delete_last_entry=AsyncMock(return_value="- 18:34:42 > hello"),
         save_photo=AsyncMock(return_value="2026/attachments/ts.jpg"),
-        get_note_frontmatter=AsyncMock(return_value={"tags": ["journal", "work"]}),
+        get_note_frontmatter=AsyncMock(
+            return_value={"tags": ["journal", "work"], "mood": None}
+        ),
         update_frontmatter=AsyncMock(),
         note_has_entry=AsyncMock(return_value=True),
         note_has_mood=AsyncMock(return_value=False),
@@ -98,6 +101,7 @@ def _private_update(
     location: object | None = None,
     media_group_id: str | None = None,
     callback_data: str | None = None,
+    message_id: int = 1,
 ) -> SimpleNamespace:
     """Build a minimal private Update-like object."""
     message = SimpleNamespace(
@@ -108,6 +112,7 @@ def _private_update(
         photo=photo,
         location=location,
         media_group_id=media_group_id,
+        message_id=message_id,
         reply_text=AsyncMock(),
     )
     callback_query = None
@@ -136,8 +141,9 @@ async def test_help_mood_setdate_resetdate_commands(journal_bot: JournalBot) -> 
     await journal_bot.mood_command(update, context)  # type: ignore
     await journal_bot.setdate_command(update, context)  # type: ignore
     await journal_bot.resetdate_command(update, context)  # type: ignore
+    await journal_bot.delete_command(update, context)  # type: ignore
 
-    assert update.effective_message.reply_text.await_count == 4
+    assert update.effective_message.reply_text.await_count == 5
 
 
 @pytest.mark.asyncio
@@ -161,6 +167,20 @@ async def test_tags_command_uses_frontmatter(journal_bot: JournalBot) -> None:
 
     first_arg = update.effective_message.reply_text.await_args.args[0]
     assert "Current:" in first_arg
+
+
+@pytest.mark.asyncio
+async def test_tags_command_adds_custom_tags_from_args(journal_bot: JournalBot) -> None:
+    """Tags command should accept free-form tags provided as args."""
+    update = _private_update()
+    context = _context(args=["kids", "work"])
+
+    await journal_bot.tags_command(update, context)
+
+    assert journal_bot._repository.update_frontmatter.await_count == 1  # type: ignore
+    first_arg = update.effective_message.reply_text.await_args.args[0]
+    assert "Updated:" in first_arg
+    assert "kids" in first_arg
 
 
 @pytest.mark.asyncio
@@ -192,6 +212,49 @@ async def test_handle_text_location_photo_and_album(journal_bot: JournalBot) -> 
 
     assert journal_bot._repository.append_entry.await_count >= 3  # type: ignore
     assert context.job_queue.once_jobs
+
+
+@pytest.mark.asyncio
+async def test_entry_ack_and_initial_mood_prompt(journal_bot: JournalBot) -> None:
+    """New journal entries should acknowledge write and ask for mood when missing."""
+    context = _context()
+    update = _private_update(text="hello")
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
+    assert "✅ Added to journal." in replies
+    assert "How are you feeling today?" in replies
+
+
+@pytest.mark.asyncio
+async def test_entry_ack_without_mood_prompt_when_mood_exists(
+    journal_bot: JournalBot,
+) -> None:
+    """Entries should still acknowledge writes even when mood prompt is skipped."""
+    journal_bot._repository.note_has_mood = AsyncMock(return_value=True)  # type: ignore
+    context = _context()
+    update = _private_update(text="hello")
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
+    assert replies == ["✅ Added to journal."]
+
+
+@pytest.mark.asyncio
+async def test_setdate_uses_date_scoped_mood_prompt(journal_bot: JournalBot) -> None:
+    """Mood prompt should still trigger when override date differs from last prompt date."""
+    context = _context()
+    context.chat_data[LAST_PROMPT_AT_KEY] = datetime.now(UTC)
+    context.chat_data["last_prompt_note"] = "2026-03-07"
+    context.chat_data["override_date"] = datetime(2026, 3, 1, 9, 0, 0, tzinfo=UTC)
+
+    update = _private_update(text="hello")
+    await journal_bot.handle_journal_entry(update, context)
+
+    replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
+    assert "How are you feeling today?" in replies
 
 
 @pytest.mark.asyncio
@@ -239,6 +302,7 @@ async def test_callback_router_mood_and_tags(journal_bot: JournalBot) -> None:
     await journal_bot.callback_router(remove_update, context)
 
     assert journal_bot._repository.update_frontmatter.await_count >= 3  # type: ignore
+    assert journal_bot._repository.append_entry.await_count >= 1  # type: ignore
 
 
 @pytest.mark.asyncio
@@ -354,6 +418,7 @@ async def test_unauthorized_early_returns_cover_branches(
     await journal_bot.setdate_command(update, context)
     await journal_bot.resetdate_command(update, context)
     await journal_bot.mood_command(update, context)
+    await journal_bot.delete_command(update, context)
     await journal_bot.tags_command(update, context)
     await journal_bot.handle_journal_entry(update, context)
 

@@ -22,7 +22,7 @@ def render_message_markdown(message: Message) -> str:
 
 def format_text_entry(dt: datetime, text: str) -> str:
     """Format a text journal line with a timestamp."""
-    return f"{dt.strftime('%H:%M')} - {text.strip()}"
+    return f"- {dt.strftime('%H:%M:%S')} > {text.strip()}"
 
 
 def format_location_entry(dt: datetime, latitude: float, longitude: float) -> str:
@@ -34,7 +34,7 @@ def format_location_entry(dt: datetime, latitude: float, longitude: float) -> st
 
     map_url = f"https://maps.google.com/?q={latitude},{longitude}"
     return (
-        f"{dt.strftime('%H:%M')} Location: "
+        f"- {dt.strftime('%H:%M:%S')} > Location: "
         f"{lat_abs:.4f}° {ns}, {lon_abs:.4f}° {ew} "
         f"[Map]({map_url})"
     )

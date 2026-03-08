@@ -20,13 +20,13 @@ async def test_append_entry_creates_note_with_defaults(tmp_path: Path) -> None:
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    note_path = await repo.append_entry(note_dt, "18:34 - First entry #journal")
+    note_path = await repo.append_entry(note_dt, "- 18:34:42 > First entry #journal")
     content = note_path.read_text(encoding="utf-8")
 
     assert "mood: null" in content
     assert "tags:" in content
     assert "- journal" in content
-    assert "18:34 - First entry #journal" in content
+    assert "- 18:34:42 > First entry #journal" in content
 
 
 @pytest.mark.asyncio
@@ -35,7 +35,7 @@ async def test_frontmatter_updates_preserve_body(tmp_path: Path) -> None:
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    await repo.append_entry(note_dt, "18:34 - Body")
+    await repo.append_entry(note_dt, "- 18:34:42 > Body")
     note_path = await repo.update_frontmatter(
         note_dt,
         {"mood": 4, "tags": ["journal", "work"]},
@@ -44,7 +44,7 @@ async def test_frontmatter_updates_preserve_body(tmp_path: Path) -> None:
     content = note_path.read_text(encoding="utf-8")
     assert "mood: 4" in content
     assert "- work" in content
-    assert "18:34 - Body" in content
+    assert "- 18:34:42 > Body" in content
 
 
 @pytest.mark.asyncio
@@ -53,11 +53,11 @@ async def test_get_last_entry_time_reads_latest_timestamp(tmp_path: Path) -> Non
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    await repo.append_entry(note_dt, "18:34 - One")
-    await repo.append_entry(note_dt, "19:15 - Two")
+    await repo.append_entry(note_dt, "- 18:34:42 > One")
+    await repo.append_entry(note_dt, "- 19:15:07 > Two")
 
     last = await repo.get_last_entry_time(note_dt)
-    assert last == datetime(2026, 3, 7, 19, 15, tzinfo=UTC)
+    assert last == datetime(2026, 3, 7, 19, 15, 7, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,11 @@ async def test_note_presence_and_mood_checks(tmp_path: Path) -> None:
     assert not await repo.note_has_entry(note_dt)
     assert not await repo.note_has_mood(note_dt)
 
-    await repo.append_entry(note_dt, "18:34 - hi", {"mood": 3})
+    await repo.append_entry(
+        note_dt,
+        "- 18:34:42 > hi",
+        {"mood": 3},
+    )
     assert await repo.note_has_entry(note_dt)
     assert await repo.note_has_mood(note_dt)
 
@@ -153,9 +157,38 @@ async def test_append_entry_with_frontmatter_updates(tmp_path: Path) -> None:
 
     note_path = await repo.append_entry(
         note_dt,
-        "18:34 - merged",
-        {"tags": ["journal", "work"], "mood": 4},
+        "- 18:34:42 > merged",
+        {
+            "tags": ["journal", "work"],
+            "mood": 4,
+        },
     )
     text = note_path.read_text(encoding="utf-8")
     assert "mood: 4" in text
     assert "- work" in text
+
+
+@pytest.mark.asyncio
+async def test_delete_last_entry_removes_tail_block(tmp_path: Path) -> None:
+    """Delete helper should remove the last entry block from note body."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    await repo.append_entry(note_dt, "- 18:34:42 > one")
+    await repo.append_entry(note_dt, "- 18:35:00 > two")
+
+    removed = await repo.delete_last_entry(note_dt)
+    assert removed == "- 18:35:00 > two"
+
+    note_path = repo.get_note_path(note_dt)
+    content = note_path.read_text(encoding="utf-8")
+    assert "- 18:34:42 > one" in content
+    assert "- 18:35:00 > two" not in content
+
+
+@pytest.mark.asyncio
+async def test_delete_last_entry_none_when_empty(tmp_path: Path) -> None:
+    """Delete helper should return None when note body is empty."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    assert await repo.delete_last_entry(note_dt) is None

@@ -52,13 +52,11 @@ def should_prompt_for_mood(
     reminder_interval_hours: int = 4,
 ) -> bool:
     """Decide whether a mood prompt should be sent for the chat."""
-    if not note_has_entry or note_has_mood or last_entry_at is None:
+    del last_entry_at
+    if not note_has_entry or note_has_mood:
         return False
 
     threshold = timedelta(hours=reminder_interval_hours)
-    if now - last_entry_at <= threshold:
-        return False
-
     if last_prompted_at is None:
         return True
 

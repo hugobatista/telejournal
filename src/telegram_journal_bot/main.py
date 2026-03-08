@@ -19,7 +19,14 @@ def _configure_logging(log_level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+
     )
+
+    # set higher logging level for httpx to avoid all GET and POST requests being logged
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+
 
 
 def main() -> None:

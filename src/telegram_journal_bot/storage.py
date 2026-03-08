@@ -17,7 +17,9 @@ import yaml
 from telegram import PhotoSize
 
 LOGGER = logging.getLogger(__name__)
-_TIMESTAMP_RE = re.compile(r"^(?P<hour>\d{2}):(?P<minute>\d{2})")
+_TIMESTAMP_RE = re.compile(
+    r"^\s*(?:-\s*)?(?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?"
+)
 
 
 @dataclass
@@ -173,6 +175,25 @@ class VaultRepository:
             await self._write_note(note_path, frontmatter, note_data.body)
         return note_path
 
+    async def delete_last_entry(self, note_dt: datetime) -> str | None:
+        """Delete the last body entry block and return removed content."""
+        note_path = self.get_note_path(note_dt)
+        lock = self._locks[note_path]
+        async with lock:
+            note_data = await self._read_note(note_path)
+            body = note_data.body.strip()
+            if not body:
+                return None
+
+            entries = [entry for entry in body.split("\n\n") if entry.strip()]
+            if not entries:
+                return None
+
+            removed = entries.pop().strip()
+            next_body = "\n\n".join(entries)
+            await self._write_note(note_path, note_data.frontmatter, next_body)
+            return removed
+
     async def note_has_entry(self, note_dt: datetime) -> bool:
         """Return whether a note contains at least one body entry."""
         note_path = self.get_note_path(note_dt)
@@ -183,13 +204,22 @@ class VaultRepository:
         """Return whether a note has mood set to a non-null value."""
         frontmatter = await self.get_note_frontmatter(note_dt)
         mood = frontmatter.get("mood")
+        if isinstance(mood, int):
+            return True
+        if isinstance(mood, list):
+            for item in mood:
+                if isinstance(item, dict) and isinstance(item.get("value"), int):
+                    return True
+            return False
+        if isinstance(mood, dict):
+            return isinstance(mood.get("value"), int)
         return mood is not None
 
     async def get_last_entry_time(
         self,
         note_dt: datetime,
     ) -> datetime | None:
-        """Infer the last entry timestamp from note body HH:MM lines."""
+        """Infer the last entry timestamp from note body timestamped lines."""
         note_path = self.get_note_path(note_dt)
         note_data = await self._read_note(note_path)
         if not note_data.body.strip():
@@ -203,9 +233,14 @@ class VaultRepository:
 
             hour = int(match.group("hour"))
             minute = int(match.group("minute"))
+            second = int(match.group("second") or 0)
             parsed = datetime.combine(
                 note_dt.date(),
-                datetime.min.time().replace(hour=hour, minute=minute),
+                datetime.min.time().replace(
+                    hour=hour,
+                    minute=minute,
+                    second=second,
+                ),
             ).replace(tzinfo=UTC)
             last_time = parsed
 

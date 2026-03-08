@@ -86,8 +86,8 @@ def test_effective_note_datetime_with_override() -> None:
     )
 
 
-def test_should_not_prompt_when_no_entry_or_no_last_entry() -> None:
-    """Missing data preconditions should skip mood reminders."""
+def test_should_not_prompt_when_no_entry() -> None:
+    """Notes without journal entries should not trigger reminders."""
     now = datetime.now(UTC)
     assert not should_prompt_for_mood(
         note_has_entry=False,
@@ -96,7 +96,12 @@ def test_should_not_prompt_when_no_entry_or_no_last_entry() -> None:
         now=now,
         last_prompted_at=None,
     )
-    assert not should_prompt_for_mood(
+
+
+def test_should_prompt_without_previous_prompt_when_no_mood() -> None:
+    """Any note with entries and no mood should prompt when not prompted yet."""
+    now = datetime.now(UTC)
+    assert should_prompt_for_mood(
         note_has_entry=True,
         note_has_mood=False,
         last_entry_at=None,
@@ -105,16 +110,9 @@ def test_should_not_prompt_when_no_entry_or_no_last_entry() -> None:
     )
 
 
-def test_should_not_prompt_before_threshold_or_too_soon_after_prompt() -> None:
-    """Prompt should wait for threshold and re-prompt interval."""
+def test_should_not_prompt_too_soon_after_prompt() -> None:
+    """Re-prompts should wait for interval when mood is still missing."""
     now = datetime.now(UTC)
-    assert not should_prompt_for_mood(
-        note_has_entry=True,
-        note_has_mood=False,
-        last_entry_at=now - timedelta(hours=3, minutes=59),
-        now=now,
-        last_prompted_at=None,
-    )
     assert not should_prompt_for_mood(
         note_has_entry=True,
         note_has_mood=False,

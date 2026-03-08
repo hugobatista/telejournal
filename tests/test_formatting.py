@@ -35,15 +35,15 @@ def test_render_message_markdown_empty() -> None:
 
 
 def test_format_text_entry() -> None:
-    """Text entries should include HH:MM prefix and stripped body."""
+    """Text entries should include HH:MM:SS bullet prefix and stripped body."""
     dt = datetime(2026, 3, 7, 18, 34, tzinfo=UTC)
-    assert format_text_entry(dt, "  hello  ") == "18:34 - hello"
+    assert format_text_entry(dt, "  hello  ") == "- 18:34:00 > hello"
 
 
 def test_format_location_entry_quadrants() -> None:
     """Location format should include hemisphere and map URL."""
     dt = datetime(2026, 3, 7, 18, 35, tzinfo=UTC)
     rendered = format_location_entry(dt, -38.7223, 9.1393)
-    assert "18:35 Location:" in rendered
+    assert "- 18:35:00 > Location:" in rendered
     assert "38.7223° S, 9.1393° E" in rendered
     assert "https://maps.google.com/?q=-38.7223,9.1393" in rendered
