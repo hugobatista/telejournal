@@ -107,11 +107,7 @@ def format_location_entry(latitude: float, longitude: float) -> str:
     lon_abs = abs(longitude)
 
     map_url = f"https://maps.google.com/?q={latitude},{longitude}"
-    return (
-        "Location: "
-        f"{lat_abs:.4f}° {ns}, {lon_abs:.4f}° {ew} "
-        f"[Map]({map_url})"
-    )
+    return "Location: " f"{lat_abs:.4f}° {ns}, {lon_abs:.4f}° {ew} " f"[Map]({map_url})"
 
 
 def format_photo_entry(caption: str, attachment_rel: str, fallback: str) -> str:

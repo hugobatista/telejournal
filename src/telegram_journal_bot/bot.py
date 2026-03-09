@@ -77,25 +77,25 @@ def _parse_tags_from_args(args: list[str]) -> set[str]:
 
 def _parse_iso_date(raw_date: str) -> datetime:
     """Parse YYYY-MM-DD into a UTC datetime at midnight.
-    
+
     Validates that the date is within reasonable bounds:
     - Not more than 2 years in the past
     - Not more than 1 year in the future
     """
     parsed_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
     result = datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=UTC)
-    
+
     # SECURITY: Validate date bounds to prevent DoS via extreme dates
     now = datetime.now(UTC)
     min_date = now - timedelta(days=730)  # 2 years back
     max_date = now + timedelta(days=365)  # 1 year forward
-    
+
     if result < min_date or result > max_date:
         raise ValueError(
             f"Date {raw_date} is outside allowed range "
             f"({min_date.date()} to {max_date.date()})"
         )
-    
+
     return result
 
 
@@ -442,9 +442,7 @@ class JournalBot:
         rendered_tags = ", ".join(sorted(current_tags))
         if update.effective_message:
             response = (
-                f"Updated: {rendered_tags}"
-                if args
-                else f"Current: {rendered_tags}"
+                f"Updated: {rendered_tags}" if args else f"Current: {rendered_tags}"
             )
             await update.effective_message.reply_text(
                 response,
@@ -519,12 +517,12 @@ class JournalBot:
         if media_group_id and context.job_queue is not None:
             chat_data = self._chat_data(context)
             albums = chat_data.setdefault(ALBUMS_KEY, {})
-            
+
             # Extract quote only once per album (from first message)
             quote = None
             if media_group_id not in albums:
                 quote = extract_reply_quote(message)
-            
+
             album_state = albums.setdefault(
                 media_group_id,
                 {
@@ -554,14 +552,12 @@ class JournalBot:
                     )
             return False
 
-        heading = (
-            format_photo_entry(caption, attachment_rel, "Photo")
-        )
-        
+        heading = format_photo_entry(caption, attachment_rel, "Photo")
+
         quote = extract_reply_quote(message)
         if quote:
             heading = format_with_quote(quote, heading)
-        
+
         entry = format_entry_block(note_dt, heading, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -603,13 +599,11 @@ class JournalBot:
         if not isinstance(note_dt, datetime) or not images:
             return
 
-        heading = (
-            format_album_entry(caption, images, "Photo album")
-        )
-        
+        heading = format_album_entry(caption, images, "Photo album")
+
         if quote:
             heading = format_with_quote(quote, heading)
-        
+
         include_timestamp = bool(album_state.get("include_timestamp", True))
         entry = format_entry_block(note_dt, heading, include_timestamp)
         try:
@@ -637,13 +631,13 @@ class JournalBot:
     ) -> None:
         """Persist a location message as a markdown journal line."""
         body = format_location_entry(latitude, longitude)
-        
+
         message = update.effective_message
         if message:
             quote = extract_reply_quote(message)
             if quote:
                 body = format_with_quote(quote, body)
-        
+
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         location_data = {
@@ -696,11 +690,11 @@ class JournalBot:
         attachment_rel = await self._repository.save_voice(message.voice, note_dt, ts)
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Voice recording")
-        
+
         quote = extract_reply_quote(message)
         if quote:
             body = format_with_quote(quote, body)
-        
+
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -728,11 +722,11 @@ class JournalBot:
         attachment_rel = await self._repository.save_video(message.video, note_dt, ts)
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Video message")
-        
+
         quote = extract_reply_quote(message)
         if quote:
             body = format_with_quote(quote, body)
-        
+
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -757,14 +751,16 @@ class JournalBot:
             return False
 
         ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-        attachment_rel = await self._repository.save_video_note(message.video_note, note_dt, ts)
+        attachment_rel = await self._repository.save_video_note(
+            message.video_note, note_dt, ts
+        )
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Video note")
-        
+
         quote = extract_reply_quote(message)
         if quote:
             body = format_with_quote(quote, body)
-        
+
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -877,7 +873,9 @@ class JournalBot:
             elif message.text:
                 text = render_message_markdown(message)
                 quote = extract_reply_quote(message)
-                await self._handle_text(text, context, note_dt, include_timestamp, quote)
+                await self._handle_text(
+                    text, context, note_dt, include_timestamp, quote
+                )
                 wrote_entry = True
         except OSError:
             LOGGER.exception("Vault write failed")
@@ -1004,19 +1002,21 @@ class JournalBot:
             except ValueError:
                 LOGGER.warning("Invalid tag callback data format: %s", query.data)
                 return
-            
+
             # SECURITY: Whitelist validation for action
             if action not in ("add", "remove"):
                 LOGGER.warning("Invalid tag action: %s", action)
                 return
-            
+
             frontmatter = await self._repository.get_note_frontmatter(note_dt)
             current_tags = set(frontmatter.get("tags") or ["journal"])
-            
+
             # SECURITY: Accept tags from TAG_CHOICES or existing tags
             # This allows removal of tags added via /tags command
             if tag not in TAG_CHOICES and tag not in current_tags:
-                LOGGER.warning("Invalid tag value (not in choices or existing): %s", tag)
+                LOGGER.warning(
+                    "Invalid tag value (not in choices or existing): %s", tag
+                )
                 return
 
             if action == "add":
@@ -1089,11 +1089,7 @@ class JournalBot:
 
     def register_handlers(self, application: Application) -> None:  # type: ignore[type-arg]
         """Register bot command, callback, and message handlers."""
-        text_filter = (
-            filters.TEXT
-            & (~filters.COMMAND)
-            & filters.ChatType.PRIVATE
-        )
+        text_filter = filters.TEXT & (~filters.COMMAND) & filters.ChatType.PRIVATE
         photo_filter = filters.PHOTO & filters.ChatType.PRIVATE
         voice_filter = filters.VOICE & filters.ChatType.PRIVATE
         video_filter = filters.VIDEO & filters.ChatType.PRIVATE
@@ -1104,7 +1100,9 @@ class JournalBot:
         application.add_handler(MessageHandler(photo_filter, self.handle_journal_entry))
         application.add_handler(MessageHandler(voice_filter, self.handle_journal_entry))
         application.add_handler(MessageHandler(video_filter, self.handle_journal_entry))
-        application.add_handler(MessageHandler(video_note_filter, self.handle_journal_entry))
+        application.add_handler(
+            MessageHandler(video_note_filter, self.handle_journal_entry)
+        )
         application.add_handler(
             MessageHandler(location_filter, self.handle_journal_entry)
         )

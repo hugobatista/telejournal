@@ -49,7 +49,9 @@ class _FakeJournalBot:
         self.jobs_registered = True
 
 
-def test_main_registers_and_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_main_registers_and_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Entrypoint should build app, register handlers/jobs, then start polling."""
     settings = Settings("token", tmp_path, {1})
     app = _FakeApplication(has_job_queue=True)

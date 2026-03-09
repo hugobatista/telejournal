@@ -28,7 +28,9 @@ def _parse_allowed_user_ids(raw_value: str) -> set[int]:
             continue
         parsed.add(int(value))
     if not parsed:
-        raise ValueError("TELEGRAM_ALLOWED_USER_IDS must contain at least one valid user ID")
+        raise ValueError(
+            "TELEGRAM_ALLOWED_USER_IDS must contain at least one valid user ID"
+        )
     return parsed
 
 
@@ -56,9 +58,11 @@ def load_settings() -> Settings:
     )
     if window_seconds < 0:
         raise ValueError("MESSAGE_TIMESTAMP_WINDOW_SECONDS must be >= 0")
-    
+
     # SECURITY: Parse secure file permissions setting (enabled by default)
-    secure_permissions_raw = os.getenv("SECURE_FILE_PERMISSIONS", "true").strip().lower()
+    secure_permissions_raw = (
+        os.getenv("SECURE_FILE_PERMISSIONS", "true").strip().lower()
+    )
     secure_permissions = secure_permissions_raw in ("true", "1", "yes", "on")
 
     return Settings(

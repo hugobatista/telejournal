@@ -66,7 +66,9 @@ def journal_bot(tmp_path: Path) -> JournalBot:
         delete_last_entry=AsyncMock(return_value="%% 18:34:42 %%\nhello"),
         delete_day=AsyncMock(return_value=True),
         peek_last_entry=AsyncMock(return_value="%% 18:34:42 %%\nhello"),
-        get_note_content=AsyncMock(return_value="---\nmood: 3\n---\n\n%% 18:00:00 %%\nhi\n"),
+        get_note_content=AsyncMock(
+            return_value="---\nmood: 3\n---\n\n%% 18:00:00 %%\nhi\n"
+        ),
         save_photo=AsyncMock(return_value="2026/attachments/ts.jpg"),
         save_voice=AsyncMock(return_value="2026/attachments/voice.ogg"),
         save_video=AsyncMock(return_value="2026/attachments/video.mp4"),
@@ -296,7 +298,9 @@ async def test_entry_ack_and_initial_mood_prompt(journal_bot: JournalBot) -> Non
 
     await journal_bot.handle_journal_entry(update, context)
 
-    replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
+    replies = [
+        call.args[0] for call in update.effective_message.reply_text.await_args_list
+    ]
     assert "✅ Added to journal." in replies
     assert "How are you feeling today?" in replies
 
@@ -312,7 +316,9 @@ async def test_entry_ack_without_mood_prompt_when_mood_exists(
 
     await journal_bot.handle_journal_entry(update, context)
 
-    replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
+    replies = [
+        call.args[0] for call in update.effective_message.reply_text.await_args_list
+    ]
     assert replies == ["✅ Added to journal."]
 
 
@@ -327,12 +333,16 @@ async def test_setdate_uses_date_scoped_mood_prompt(journal_bot: JournalBot) -> 
     update = _private_update(text="hello")
     await journal_bot.handle_journal_entry(update, context)
 
-    replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
+    replies = [
+        call.args[0] for call in update.effective_message.reply_text.await_args_list
+    ]
     assert "How are you feeling today?" in replies
 
 
 @pytest.mark.asyncio
-async def test_delete_command_replies_with_deleted_entry(journal_bot: JournalBot) -> None:
+async def test_delete_command_replies_with_deleted_entry(
+    journal_bot: JournalBot,
+) -> None:
     """Delete command without args should request confirmation first."""
     context = _context()
     update = _private_update()
@@ -354,7 +364,10 @@ async def test_delete_command_day_argument(journal_bot: JournalBot) -> None:
     await journal_bot.delete_command(update, context)
 
     assert journal_bot._repository.delete_day.await_count == 0  # type: ignore
-    assert "Confirm deleting day 2026-03-06" in update.effective_message.reply_text.await_args.args[0]
+    assert (
+        "Confirm deleting day 2026-03-06"
+        in update.effective_message.reply_text.await_args.args[0]
+    )
 
 
 @pytest.mark.asyncio
@@ -404,7 +417,9 @@ async def test_show_command_error_paths(journal_bot: JournalBot) -> None:
 
 
 @pytest.mark.asyncio
-async def test_show_command_returns_when_message_missing(journal_bot: JournalBot) -> None:
+async def test_show_command_returns_when_message_missing(
+    journal_bot: JournalBot,
+) -> None:
     """Show command should no-op when effective_message is unavailable."""
     update = _private_update()
     update.effective_message = None
@@ -418,7 +433,9 @@ async def test_delete_command_error_paths(journal_bot: JournalBot) -> None:
 
     journal_bot._repository.peek_last_entry = AsyncMock(return_value=None)  # type: ignore
     await journal_bot.delete_command(update, _context())
-    assert "No entries to delete" in update.effective_message.reply_text.await_args.args[0]
+    assert (
+        "No entries to delete" in update.effective_message.reply_text.await_args.args[0]
+    )
 
     await journal_bot.delete_command(update, _context(args=["nope"]))
     assert "Use: /delete" in update.effective_message.reply_text.await_args.args[0]
@@ -432,7 +449,9 @@ async def test_delete_command_error_paths(journal_bot: JournalBot) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_command_returns_when_message_missing(journal_bot: JournalBot) -> None:
+async def test_delete_command_returns_when_message_missing(
+    journal_bot: JournalBot,
+) -> None:
     """Delete command should no-op when effective_message is unavailable."""
     update = _private_update()
     update.effective_message = None
@@ -739,13 +758,18 @@ async def test_flush_album_without_timestamp_marker(journal_bot: JournalBot) -> 
 
 
 @pytest.mark.asyncio
-async def test_callback_router_delete_confirm_and_cancel(journal_bot: JournalBot) -> None:
+async def test_callback_router_delete_confirm_and_cancel(
+    journal_bot: JournalBot,
+) -> None:
     """Delete callbacks should apply confirmed action and support cancel."""
     context = _context()
 
     cancel_update = _private_update(callback_data=f"{DELETE_CALLBACK_PREFIX}cancel")
     await journal_bot.callback_router(cancel_update, context)
-    assert "Deletion canceled" in cancel_update.callback_query.edit_message_text.await_args.args[0]
+    assert (
+        "Deletion canceled"
+        in cancel_update.callback_query.edit_message_text.await_args.args[0]
+    )
 
     confirm_last = _private_update(
         callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last:2026-03-07"
@@ -761,11 +785,15 @@ async def test_callback_router_delete_confirm_and_cancel(journal_bot: JournalBot
 
 
 @pytest.mark.asyncio
-async def test_callback_router_delete_confirm_error_paths(journal_bot: JournalBot) -> None:
+async def test_callback_router_delete_confirm_error_paths(
+    journal_bot: JournalBot,
+) -> None:
     """Delete callbacks should ignore invalid payloads and handle missing targets."""
     context = _context()
 
-    invalid_shape = _private_update(callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last")
+    invalid_shape = _private_update(
+        callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last"
+    )
     await journal_bot.callback_router(invalid_shape, context)
 
     invalid_date = _private_update(
@@ -778,7 +806,10 @@ async def test_callback_router_delete_confirm_error_paths(journal_bot: JournalBo
         callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last:2026-03-07"
     )
     await journal_bot.callback_router(no_last, context)
-    assert "No entries to delete" in no_last.callback_query.edit_message_text.await_args.args[0]
+    assert (
+        "No entries to delete"
+        in no_last.callback_query.edit_message_text.await_args.args[0]
+    )
 
     journal_bot._repository.delete_day = AsyncMock(return_value=False)  # type: ignore
     no_day = _private_update(
@@ -789,7 +820,9 @@ async def test_callback_router_delete_confirm_error_paths(journal_bot: JournalBo
 
 
 @pytest.mark.asyncio
-async def test_callback_router_mood_change_from_previous(journal_bot: JournalBot) -> None:
+async def test_callback_router_mood_change_from_previous(
+    journal_bot: JournalBot,
+) -> None:
     """Mood callback should record explicit mood change when previous mood exists."""
     journal_bot._repository.get_note_frontmatter = AsyncMock(  # type: ignore
         return_value={"tags": ["journal"], "mood": 3}
@@ -899,7 +932,9 @@ async def test_text_message_with_self_reply_quote(journal_bot: JournalBot) -> No
         video_note=None,
         location=None,
     )
-    update = _private_update(text="this is a great message", reply_to_message=replied_msg)
+    update = _private_update(
+        text="this is a great message", reply_to_message=replied_msg
+    )
     context = _context()
 
     await journal_bot.handle_journal_entry(update, context)
@@ -1075,7 +1110,9 @@ async def test_reply_to_media_without_text(journal_bot: JournalBot) -> None:
 
 
 @pytest.mark.asyncio
-async def test_video_note_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+async def test_video_note_message_with_self_reply_quote(
+    journal_bot: JournalBot,
+) -> None:
     """Video note replying to self should include quoted original message."""
     replied_msg = SimpleNamespace(
         text="check this",
@@ -1088,7 +1125,9 @@ async def test_video_note_message_with_self_reply_quote(journal_bot: JournalBot)
         video_note=None,
         location=None,
     )
-    update = _private_update(video_note=object(), text=None, reply_to_message=replied_msg)
+    update = _private_update(
+        video_note=object(), text=None, reply_to_message=replied_msg
+    )
     context = _context()
 
     await journal_bot.handle_journal_entry(update, context)
@@ -1114,7 +1153,7 @@ async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
         video_note=None,
         location=None,
     )
-    
+
     # First photo in album with reply
     update1 = _private_update(
         photo=[object()],
@@ -1125,7 +1164,7 @@ async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
     )
     context = _context()
     await journal_bot.handle_journal_entry(update1, context)
-    
+
     # Second photo in same album
     update2 = _private_update(
         photo=[object()],
@@ -1135,13 +1174,13 @@ async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
         reply_to_message=None,
     )
     await journal_bot.handle_journal_entry(update2, context)
-    
+
     # Setup context for flush with shared chat_data
     context.job = SimpleNamespace(data={"chat_id": 1, "media_group_id": "album123"})
     context.application.chat_data[1] = context.chat_data
-    
+
     await journal_bot.flush_album_entry(context)
-    
+
     assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
     call_args = journal_bot._repository.append_entry.await_args  # type: ignore
     entry_text = call_args.args[1]
@@ -1153,11 +1192,11 @@ async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
 async def test_date_bounds_validation(journal_bot: JournalBot) -> None:
     """SECURITY: _parse_iso_date should reject dates outside allowed range."""
     from telegram_journal_bot.bot import _parse_iso_date
-    
+
     # Test date too far in past (> 2 years)
     with pytest.raises(ValueError, match="outside allowed range"):
         _parse_iso_date("2020-01-01")
-    
+
     # Test date too far in future (> 1 year)
     with pytest.raises(ValueError, match="outside allowed range"):
         _parse_iso_date("2030-01-01")
@@ -1167,20 +1206,19 @@ async def test_date_bounds_validation(journal_bot: JournalBot) -> None:
 async def test_callback_router_security_validations(journal_bot: JournalBot) -> None:
     """SECURITY: callback_router should validate and reject invalid tag operations."""
     context = _context()
-    
+
     # Test invalid tag callback format (missing parts)
     malformed_update = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}badformat")
     await journal_bot.callback_router(malformed_update, context)
     # Should return early without calling repository
     assert journal_bot._repository.update_frontmatter.await_count == 0  # type: ignore
-    
+
     # Test invalid action (not "add" or "remove")
     invalid_action = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}delete:hobby")
     await journal_bot.callback_router(invalid_action, context)
     assert journal_bot._repository.update_frontmatter.await_count == 0  # type: ignore
-    
+
     # Test invalid tag (not in TAG_CHOICES and not existing)
     invalid_tag = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}add:malicious")
     await journal_bot.callback_router(invalid_tag, context)
     assert journal_bot._repository.update_frontmatter.await_count == 0  # type: ignore
-

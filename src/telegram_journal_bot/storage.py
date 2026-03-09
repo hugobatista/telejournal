@@ -35,7 +35,7 @@ class VaultRepository:
 
     def __init__(self, vault_root: Path, secure_permissions: bool = True) -> None:
         """Initialize a repository rooted at an Obsidian vault path.
-        
+
         Args:
             vault_root: Root directory for the Obsidian vault
             secure_permissions: If True, set restrictive permissions (0o700/0o600) on
@@ -44,7 +44,7 @@ class VaultRepository:
         self._vault_root = vault_root
         self._secure_permissions = secure_permissions
         self._locks: dict[Path, asyncio.Lock] = defaultdict(asyncio.Lock)
-        
+
         # SECURITY: Set restrictive permissions on vault root if enabled
         if self._secure_permissions:
             vault_root.chmod(0o700)  # rwx------
@@ -70,7 +70,7 @@ class VaultRepository:
         # SECURITY: Set restrictive permissions on year directory
         if self._secure_permissions:
             year_dir.chmod(0o700)  # rwx------
-        
+
         attachments_dir = year_dir / "attachments"
         attachments_dir.mkdir(parents=True, exist_ok=True)
         # SECURITY: Set restrictive permissions on attachments directory
