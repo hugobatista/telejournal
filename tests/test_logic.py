@@ -45,7 +45,6 @@ def test_should_prompt_for_mood_when_threshold_passed() -> None:
     assert should_prompt_for_mood(
         note_has_entry=True,
         note_has_mood=False,
-        last_entry_at=now - timedelta(hours=5),
         now=now,
         last_prompted_at=None,
         reminder_interval_hours=4,
@@ -58,7 +57,6 @@ def test_should_not_prompt_if_mood_already_set() -> None:
     assert not should_prompt_for_mood(
         note_has_entry=True,
         note_has_mood=True,
-        last_entry_at=now - timedelta(hours=10),
         now=now,
         last_prompted_at=None,
         reminder_interval_hours=4,
@@ -92,7 +90,6 @@ def test_should_not_prompt_when_no_entry() -> None:
     assert not should_prompt_for_mood(
         note_has_entry=False,
         note_has_mood=False,
-        last_entry_at=now - timedelta(hours=10),
         now=now,
         last_prompted_at=None,
     )
@@ -104,7 +101,6 @@ def test_should_prompt_without_previous_prompt_when_no_mood() -> None:
     assert should_prompt_for_mood(
         note_has_entry=True,
         note_has_mood=False,
-        last_entry_at=None,
         now=now,
         last_prompted_at=None,
     )
@@ -116,7 +112,6 @@ def test_should_not_prompt_too_soon_after_prompt() -> None:
     assert not should_prompt_for_mood(
         note_has_entry=True,
         note_has_mood=False,
-        last_entry_at=now - timedelta(hours=5),
         now=now,
         last_prompted_at=now - timedelta(hours=1),
     )

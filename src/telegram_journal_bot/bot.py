@@ -21,7 +21,12 @@ from telegram.ext import (
 
 from telegram_journal_bot.config import Settings
 from telegram_journal_bot.formatting import (
+    MOOD_LABELS,
+    extract_mood_value,
+    format_album_entry,
+    format_entry_block,
     format_location_entry,
+    format_photo_entry,
     format_text_entry,
     render_message_markdown,
 )
@@ -42,21 +47,17 @@ LAST_PROMPT_AT_KEY = "last_prompt_at"
 LAST_PROMPT_NOTE_KEY = "last_prompt_note"
 ALBUMS_KEY = "albums"
 ACTIVE_CHATS_KEY = "active_chats"
+LAST_WINDOW_AT_KEY = "last_window_at"
+LAST_WINDOW_NOTE_KEY = "last_window_note"
 
 MOOD_CALLBACK_PREFIX = "mood:"
 TAG_CALLBACK_PREFIX = "tag:"
+DELETE_CALLBACK_PREFIX = "delete:"
 ALBUM_JOB_PREFIX = "album-flush"
 ALBUM_FLUSH_SECONDS = 2
 
-MOOD_LABELS = {
-    1: "😢",
-    2: "😐",
-    3: "😌",
-    4: "🙂",
-    5: "😊",
-}
-
 TAG_CHOICES = ["family", "health", "love", "hobby", "other", "finance", "social"]
+MAX_TELEGRAM_TEXT_LEN = 4096
 
 
 def _parse_tags_from_args(args: list[str]) -> set[str]:
@@ -70,27 +71,17 @@ def _parse_tags_from_args(args: list[str]) -> set[str]:
     return parsed
 
 
-def _extract_mood_value(raw_mood: Any) -> int | None:
-    """Extract current mood value from legacy or current frontmatter shapes."""
-    if raw_mood is None:
-        return None
+def _parse_iso_date(raw_date: str) -> datetime:
+    """Parse YYYY-MM-DD into a UTC datetime at midnight."""
+    parsed_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    return datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=UTC)
 
-    if isinstance(raw_mood, int) and raw_mood in MOOD_LABELS:
-        return raw_mood
 
-    if isinstance(raw_mood, dict):
-        value = raw_mood.get("value")
-        if isinstance(value, int) and value in MOOD_LABELS:
-            return value
-
-    if isinstance(raw_mood, list):
-        for item in reversed(raw_mood):
-            if isinstance(item, dict):
-                value = item.get("value")
-                if isinstance(value, int) and value in MOOD_LABELS:
-                    return value
-
-    return None
+def _truncate_message(text: str, max_len: int = MAX_TELEGRAM_TEXT_LEN) -> str:
+    """Trim long output to fit Telegram message size limits."""
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 5]}\n..."
 
 
 def _mood_keyboard() -> InlineKeyboardMarkup:
@@ -127,6 +118,26 @@ def _tags_keyboard(current_tags: set[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def _delete_confirmation_keyboard(action: str, note_date: str) -> InlineKeyboardMarkup:
+    """Build confirmation keyboard for delete actions."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Confirm",
+                    callback_data=(
+                        f"{DELETE_CALLBACK_PREFIX}confirm:{action}:{note_date}"
+                    ),
+                ),
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data=f"{DELETE_CALLBACK_PREFIX}cancel",
+                ),
+            ]
+        ]
+    )
+
+
 class JournalBot:
     """Encapsulates handlers and shared state for journal operations."""
 
@@ -144,14 +155,11 @@ class JournalBot:
         return {}
 
     def _is_private_and_authorized(self, update: Update) -> bool:
-        """Validate private chat type and optional user whitelist."""
+        """Validate private chat type and user whitelist."""
         if not update.effective_chat:
             return False
         if update.effective_chat.type != ChatType.PRIVATE:
             return False
-
-        if not self._settings.allowed_user_ids:
-            return True
 
         user = update.effective_user
         return bool(user and user.id in self._settings.allowed_user_ids)
@@ -194,15 +202,22 @@ class JournalBot:
 
         help_text = (
             "📝 Journal Bot Usage\n\n"
-            "• Every message becomes a journal entry\n"
-            "• Photos -> embedded in attachments/ folder\n"
-            "• Locations -> coordinates + Google Maps link\n"
+            "• Every private message is journaled\n"
+            "• Photos are embedded from attachments/\n"
+            "• Voice recordings are embedded from attachments/\n"
+            "• Video messages (including circular video notes) are embedded from attachments/\n"
+            "• Messages within the configured time window share one timestamp\n"
             "• Mood tracked via /mood (😢 😐 😌 🙂 😊)\n\n"
-            "/setdate 2026-03-07 [HH:MM:SS]\n"
-            "/resetdate\n"
-            "/tags [tag ...]\n"
-            "/mood\n"
-            "/delete\n"
+            "Commands:\n"
+            "/setdate YYYY-MM-DD [HH:MM:SS]  Set target note date/time\n"
+            "/resetdate  Return to today\n"
+            "/tags  Show tag buttons\n"
+            "/tags work kids  Add/select one or more tags\n"
+            "/mood  Open mood picker\n"
+            "/show  Show current effective day note\n"
+            "/show YYYY-MM-DD  Show a specific day note\n"
+            "/delete  Delete last entry and show deleted content\n"
+            "/delete day [YYYY-MM-DD]  Delete full day note\n"
             "/help"
         )
 
@@ -256,8 +271,77 @@ class JournalBot:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Delete the last journal entry for the current effective note date."""
+        """Delete the last entry or a full day note."""
         if not self._is_private_and_authorized(update):
+            return
+
+        chat_data = self._chat_data(context)
+        default_note_dt = effective_note_datetime(
+            chat_data.get(OVERRIDE_DATE_KEY),
+            datetime.now(UTC),
+        )
+
+        if not update.effective_message:
+            return
+
+        args = context.args or []
+        if not args:
+            preview = await self._repository.peek_last_entry(default_note_dt)
+            if preview is None:
+                await update.effective_message.reply_text("No entries to delete.")
+                return
+
+            preview_text = _truncate_message(preview, max_len=3600)
+            await update.effective_message.reply_text(
+                f"Confirm deleting the last entry?\n\n{preview_text}",
+                reply_markup=_delete_confirmation_keyboard(
+                    "last",
+                    default_note_dt.strftime("%Y-%m-%d"),
+                ),
+            )
+            return
+
+        if args[0].lower() != "day" or len(args) > 2:
+            await update.effective_message.reply_text(
+                "❌ Use: /delete OR /delete day [YYYY-MM-DD]"
+            )
+            return
+
+        note_dt = default_note_dt
+        if len(args) == 2:
+            try:
+                note_dt = _parse_iso_date(args[1])
+            except ValueError:
+                await update.effective_message.reply_text(
+                    "❌ Use: /delete day [YYYY-MM-DD]"
+                )
+                return
+
+        note_content = await self._repository.get_note_content(note_dt)
+        if note_content is None:
+            await update.effective_message.reply_text(
+                f"No note found for {note_dt.strftime('%Y-%m-%d')}."
+            )
+            return
+
+        await update.effective_message.reply_text(
+            f"Confirm deleting day {note_dt.strftime('%Y-%m-%d')}?",
+            reply_markup=_delete_confirmation_keyboard(
+                "day",
+                note_dt.strftime("%Y-%m-%d"),
+            ),
+        )
+
+    async def show_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Display current effective day note or a specific YYYY-MM-DD note."""
+        if not self._is_private_and_authorized(update):
+            return
+
+        if not update.effective_message:
             return
 
         chat_data = self._chat_data(context)
@@ -265,14 +349,27 @@ class JournalBot:
             chat_data.get(OVERRIDE_DATE_KEY),
             datetime.now(UTC),
         )
-        deleted = await self._repository.delete_last_entry(note_dt)
 
-        if not update.effective_message:
+        args = context.args or []
+        if args:
+            if len(args) != 1:
+                await update.effective_message.reply_text("❌ Use: /show [YYYY-MM-DD]")
+                return
+            try:
+                note_dt = _parse_iso_date(args[0])
+            except ValueError:
+                await update.effective_message.reply_text("❌ Use: /show [YYYY-MM-DD]")
+                return
+
+        note_content = await self._repository.get_note_content(note_dt)
+        if note_content is None:
+            await update.effective_message.reply_text(
+                f"No note found for {note_dt.strftime('%Y-%m-%d')}."
+            )
             return
-        if deleted is None:
-            await update.effective_message.reply_text("No entries to delete.")
-            return
-        await update.effective_message.reply_text("🗑️ Deleted last entry.")
+
+        rendered = _truncate_message(note_content)
+        await update.effective_message.reply_text(rendered)
 
     async def mood_command(
         self,
@@ -334,16 +431,54 @@ class JournalBot:
         chat_data: dict[str, Any],
         note_dt: datetime,
         entry: str,
+        *,
+        frontmatter_updates: dict[str, Any] | None = None,
+        as_continuation: bool = False,
     ) -> None:
         """Persist entry and update in-memory tracking timestamps."""
-        await self._repository.append_entry(note_dt, entry)
+        await self._repository.append_entry(
+            note_dt,
+            entry,
+            frontmatter_updates=frontmatter_updates,
+            as_continuation=as_continuation,
+        )
         chat_data[LAST_ENTRY_AT_KEY] = datetime.now(UTC)
+
+    def _should_include_timestamp(
+        self,
+        chat_data: dict[str, Any],
+        note_dt: datetime,
+        now: datetime,
+    ) -> bool:
+        """Return whether current entry should include a fresh timestamp."""
+        window_seconds = self._settings.message_timestamp_window_seconds
+        if window_seconds <= 0:
+            chat_data[LAST_WINDOW_AT_KEY] = now
+            chat_data[LAST_WINDOW_NOTE_KEY] = note_dt.strftime("%Y-%m-%d")
+            return True
+
+        note_key = note_dt.strftime("%Y-%m-%d")
+        last_note_key = chat_data.get(LAST_WINDOW_NOTE_KEY)
+        last_window_at = chat_data.get(LAST_WINDOW_AT_KEY)
+
+        if last_note_key != note_key or not isinstance(last_window_at, datetime):
+            chat_data[LAST_WINDOW_AT_KEY] = now
+            chat_data[LAST_WINDOW_NOTE_KEY] = note_key
+            return True
+
+        if (now - last_window_at).total_seconds() > window_seconds:
+            chat_data[LAST_WINDOW_AT_KEY] = now
+            return True
+
+        chat_data[LAST_WINDOW_AT_KEY] = now
+        return False
 
     async def _handle_photo(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
+        include_timestamp: bool,
     ) -> bool:
         """Persist a photo and append embed entry in note."""
         message = update.effective_message
@@ -365,6 +500,7 @@ class JournalBot:
                     "note_dt": note_dt,
                     "caption": "",
                     "images": [],
+                    "include_timestamp": include_timestamp,
                 },
             )
 
@@ -387,14 +523,17 @@ class JournalBot:
             return False
 
         heading = (
-            format_text_entry(note_dt, caption)
-            if caption
-            else format_text_entry(note_dt, "Photo")
+            format_photo_entry(caption, attachment_rel, "Photo")
         )
-        entry = f"{heading}\n![[{attachment_rel}]]"
+        entry = format_entry_block(note_dt, heading, include_timestamp)
 
         chat_data = self._chat_data(context)
-        await self._record_entry(chat_data, note_dt, entry)
+        await self._record_entry(
+            chat_data,
+            note_dt,
+            entry,
+            as_continuation=not include_timestamp,
+        )
         return True
 
     async def flush_album_entry(self, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -427,13 +566,17 @@ class JournalBot:
             return
 
         heading = (
-            format_text_entry(note_dt, caption)
-            if caption
-            else format_text_entry(note_dt, "Photo album")
+            format_album_entry(caption, images, "Photo album")
         )
-        entry = "\n".join([heading, *images])
+        include_timestamp = bool(album_state.get("include_timestamp", True))
+        entry = format_entry_block(note_dt, heading, include_timestamp)
         try:
-            await self._record_entry(chat_data, note_dt, entry)
+            await self._record_entry(
+                chat_data,
+                note_dt,
+                entry,
+                as_continuation=not include_timestamp,
+            )
             await context.bot.send_message(chat_id, "✅ Added to journal.")
         except OSError:
             LOGGER.exception(
@@ -447,22 +590,123 @@ class JournalBot:
         note_dt: datetime,
         latitude: float,
         longitude: float,
+        include_timestamp: bool,
     ) -> None:
         """Persist a location message as a markdown journal line."""
-        entry = format_location_entry(note_dt, latitude, longitude)
+        body = format_location_entry(latitude, longitude)
+        entry = format_entry_block(note_dt, body, include_timestamp)
+
+        location_data = {
+            "latitude": round(latitude, 6),
+            "longitude": round(longitude, 6),
+        }
         chat_data = self._chat_data(context)
-        await self._record_entry(chat_data, note_dt, entry)
+        await self._record_entry(
+            chat_data,
+            note_dt,
+            entry,
+            frontmatter_updates={"location": location_data},
+            as_continuation=not include_timestamp,
+        )
 
     async def _handle_text(
         self,
         message_text: str,
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
+        include_timestamp: bool,
     ) -> None:
         """Persist a text message as a journal line."""
-        entry = format_text_entry(note_dt, message_text)
+        body = format_text_entry(message_text)
+        entry = format_entry_block(note_dt, body, include_timestamp)
         chat_data = self._chat_data(context)
-        await self._record_entry(chat_data, note_dt, entry)
+        await self._record_entry(
+            chat_data,
+            note_dt,
+            entry,
+            as_continuation=not include_timestamp,
+        )
+
+    async def _handle_voice(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        note_dt: datetime,
+        include_timestamp: bool,
+    ) -> bool:
+        """Persist a voice recording and append embed entry in note."""
+        message = update.effective_message
+        if not message or not message.voice:
+            return False
+
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        attachment_rel = await self._repository.save_voice(message.voice, note_dt, ts)
+        caption = render_message_markdown(message)
+        body = format_photo_entry(caption, attachment_rel, "Voice recording")
+        entry = format_entry_block(note_dt, body, include_timestamp)
+
+        chat_data = self._chat_data(context)
+        await self._record_entry(
+            chat_data,
+            note_dt,
+            entry,
+            as_continuation=not include_timestamp,
+        )
+        return True
+
+    async def _handle_video(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        note_dt: datetime,
+        include_timestamp: bool,
+    ) -> bool:
+        """Persist a video message and append embed entry in note."""
+        message = update.effective_message
+        if not message or not message.video:
+            return False
+
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        attachment_rel = await self._repository.save_video(message.video, note_dt, ts)
+        caption = render_message_markdown(message)
+        body = format_photo_entry(caption, attachment_rel, "Video message")
+        entry = format_entry_block(note_dt, body, include_timestamp)
+
+        chat_data = self._chat_data(context)
+        await self._record_entry(
+            chat_data,
+            note_dt,
+            entry,
+            as_continuation=not include_timestamp,
+        )
+        return True
+
+    async def _handle_video_note(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        note_dt: datetime,
+        include_timestamp: bool,
+    ) -> bool:
+        """Persist a video note (circular video) and append embed entry in note."""
+        message = update.effective_message
+        if not message or not message.video_note:
+            return False
+
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        attachment_rel = await self._repository.save_video_note(message.video_note, note_dt, ts)
+        caption = render_message_markdown(message)
+        body = format_photo_entry(caption, attachment_rel, "Video note")
+        entry = format_entry_block(note_dt, body, include_timestamp)
+
+        chat_data = self._chat_data(context)
+        await self._record_entry(
+            chat_data,
+            note_dt,
+            entry,
+            as_continuation=not include_timestamp,
+        )
+        return True
 
     async def _prompt_for_mood_if_missing(
         self,
@@ -482,7 +726,6 @@ class JournalBot:
         should_prompt = should_prompt_for_mood(
             note_has_entry=note_has_entry,
             note_has_mood=note_has_mood,
-            last_entry_at=None,
             now=now,
             last_prompted_at=last_prompted_at,
             reminder_interval_hours=4,
@@ -522,21 +765,49 @@ class JournalBot:
             now,
         )
         wrote_entry = False
+        include_timestamp = self._should_include_timestamp(chat_data, note_dt, now)
 
         try:
             if message.photo:
-                wrote_entry = await self._handle_photo(update, context, note_dt)
+                wrote_entry = await self._handle_photo(
+                    update,
+                    context,
+                    note_dt,
+                    include_timestamp,
+                )
+            elif message.voice:
+                wrote_entry = await self._handle_voice(
+                    update,
+                    context,
+                    note_dt,
+                    include_timestamp,
+                )
+            elif message.video:
+                wrote_entry = await self._handle_video(
+                    update,
+                    context,
+                    note_dt,
+                    include_timestamp,
+                )
+            elif message.video_note:
+                wrote_entry = await self._handle_video_note(
+                    update,
+                    context,
+                    note_dt,
+                    include_timestamp,
+                )
             elif message.location:
                 await self._handle_location(
                     context,
                     note_dt,
                     message.location.latitude,
                     message.location.longitude,
+                    include_timestamp,
                 )
                 wrote_entry = True
             elif message.text:
                 text = render_message_markdown(message)
-                await self._handle_text(text, context, note_dt)
+                await self._handle_text(text, context, note_dt, include_timestamp)
                 wrote_entry = True
         except OSError:
             LOGGER.exception("Vault write failed")
@@ -572,9 +843,10 @@ class JournalBot:
         await query.answer()
 
         chat_data = self._chat_data(context)
+        now = datetime.now(UTC)
         note_dt = effective_note_datetime(
             chat_data.get(OVERRIDE_DATE_KEY),
-            datetime.now(UTC),
+            now,
         )
 
         if query.data.startswith(MOOD_CALLBACK_PREFIX):
@@ -588,7 +860,7 @@ class JournalBot:
                 return
 
             frontmatter = await self._repository.get_note_frontmatter(note_dt)
-            previous = _extract_mood_value(frontmatter.get("mood"))
+            previous = extract_mood_value(frontmatter.get("mood"))
 
             await self._repository.update_frontmatter(note_dt, {"mood": mood})
 
@@ -600,18 +872,67 @@ class JournalBot:
                     )
                 else:
                     change_text = f"Mood set to {MOOD_LABELS[mood]} ({mood}/5)"
+
+                include_timestamp = self._should_include_timestamp(
+                    chat_data,
+                    note_dt,
+                    now,
+                )
                 await self._record_entry(
                     chat_data,
                     note_dt,
-                    format_text_entry(note_dt, change_text),
+                    format_entry_block(
+                        note_dt,
+                        format_text_entry(change_text),
+                        include_timestamp,
+                    ),
+                    as_continuation=not include_timestamp,
                 )
 
-            chat_data[LAST_PROMPT_AT_KEY] = datetime.now(UTC)
+            chat_data[LAST_PROMPT_AT_KEY] = now
             chat_data[LAST_PROMPT_NOTE_KEY] = note_dt.strftime("%Y-%m-%d")
             await query.edit_message_text(
                 f"Mood saved: {MOOD_LABELS.get(mood, str(mood))} ({mood}/5)"
             )
             return
+
+        if query.data.startswith(DELETE_CALLBACK_PREFIX):
+            if query.data == f"{DELETE_CALLBACK_PREFIX}cancel":
+                await query.edit_message_text("Deletion canceled.")
+                return
+
+            parts = query.data.split(":")
+            if len(parts) != 4 or parts[1] != "confirm":
+                return
+
+            action = parts[2]
+            try:
+                target_note_dt = _parse_iso_date(parts[3])
+            except ValueError:
+                return
+
+            if action == "last":
+                deleted = await self._repository.delete_last_entry(target_note_dt)
+                if deleted is None:
+                    await query.edit_message_text("No entries to delete.")
+                    return
+                deleted_preview = _truncate_message(deleted, max_len=3600)
+                await query.edit_message_text(
+                    f"🗑️ Deleted last entry:\n\n{deleted_preview}"
+                )
+                return
+
+            if action == "day":
+                deleted_day = await self._repository.delete_day(target_note_dt)
+                if not deleted_day:
+                    await query.edit_message_text(
+                        f"No note found for {target_note_dt.strftime('%Y-%m-%d')}."
+                    )
+                    return
+                await query.edit_message_text(
+                    f"🗑️ Deleted day {target_note_dt.strftime('%Y-%m-%d')}."
+                )
+                return
 
         if query.data.startswith(TAG_CALLBACK_PREFIX):
             _, action, tag = query.data.split(":", maxsplit=2)
@@ -654,7 +975,6 @@ class JournalBot:
             should_prompt = should_prompt_for_mood(
                 note_has_entry=note_has_entry,
                 note_has_mood=note_has_mood,
-                last_entry_at=None,
                 now=now,
                 last_prompted_at=last_prompted_at,
                 reminder_interval_hours=4,
@@ -695,10 +1015,16 @@ class JournalBot:
             & filters.ChatType.PRIVATE
         )
         photo_filter = filters.PHOTO & filters.ChatType.PRIVATE
+        voice_filter = filters.VOICE & filters.ChatType.PRIVATE
+        video_filter = filters.VIDEO & filters.ChatType.PRIVATE
+        video_note_filter = filters.VIDEO_NOTE & filters.ChatType.PRIVATE
         location_filter = filters.LOCATION & filters.ChatType.PRIVATE
 
         application.add_handler(MessageHandler(text_filter, self.handle_journal_entry))
         application.add_handler(MessageHandler(photo_filter, self.handle_journal_entry))
+        application.add_handler(MessageHandler(voice_filter, self.handle_journal_entry))
+        application.add_handler(MessageHandler(video_filter, self.handle_journal_entry))
+        application.add_handler(MessageHandler(video_note_filter, self.handle_journal_entry))
         application.add_handler(
             MessageHandler(location_filter, self.handle_journal_entry)
         )
@@ -708,6 +1034,7 @@ class JournalBot:
         application.add_handler(CommandHandler("tags", self.tags_command))
         application.add_handler(CommandHandler("mood", self.mood_command))
         application.add_handler(CommandHandler("delete", self.delete_command))
+        application.add_handler(CommandHandler("show", self.show_command))
         application.add_handler(CommandHandler("help", self.help_command))
 
         application.add_handler(CallbackQueryHandler(self.callback_router))

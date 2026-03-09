@@ -3,8 +3,29 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from telegram import Message
+
+MOOD_LABELS = {
+    1: "😢",
+    2: "😐",
+    3: "😌",
+    4: "🙂",
+    5: "😊",
+}
+
+
+def extract_mood_value(raw_mood: Any) -> int | None:
+    """Extract current mood value from frontmatter."""
+    if isinstance(raw_mood, int) and raw_mood in MOOD_LABELS:
+        return raw_mood
+    return None
+
+
+def format_timestamp_marker(dt: datetime) -> str:
+    """Format a timestamp marker as a markdown comment line."""
+    return f"%% {dt.strftime('%H:%M:%S')} %%"
 
 
 def render_message_markdown(message: Message) -> str:
@@ -20,12 +41,12 @@ def render_message_markdown(message: Message) -> str:
     return ""
 
 
-def format_text_entry(dt: datetime, text: str) -> str:
-    """Format a text journal line with a timestamp."""
-    return f"- {dt.strftime('%H:%M:%S')} > {text.strip()}"
+def format_text_entry(text: str) -> str:
+    """Format a plain text journal line without timestamp decoration."""
+    return text.strip()
 
 
-def format_location_entry(dt: datetime, latitude: float, longitude: float) -> str:
+def format_location_entry(latitude: float, longitude: float) -> str:
     """Format a location entry line with map URL."""
     ns = "N" if latitude >= 0 else "S"
     ew = "E" if longitude >= 0 else "W"
@@ -34,7 +55,31 @@ def format_location_entry(dt: datetime, latitude: float, longitude: float) -> st
 
     map_url = f"https://maps.google.com/?q={latitude},{longitude}"
     return (
-        f"- {dt.strftime('%H:%M:%S')} > Location: "
+        "Location: "
         f"{lat_abs:.4f}° {ns}, {lon_abs:.4f}° {ew} "
         f"[Map]({map_url})"
     )
+
+
+def format_photo_entry(caption: str, attachment_rel: str, fallback: str) -> str:
+    """Format a single photo entry with optional caption and embed."""
+    heading = format_text_entry(caption) if caption else fallback
+    return f"{heading}\n![[{attachment_rel}]]"
+
+
+def format_album_entry(caption: str, images: list[str], fallback: str) -> str:
+    """Format a photo album entry as heading followed by embeds."""
+    heading = format_text_entry(caption) if caption else fallback
+    return "\n".join([heading, *images])
+
+
+def format_entry_block(dt: datetime, body: str, include_timestamp: bool) -> str:
+    """Render a persisted entry with optional timestamp marker line."""
+    clean_body = body.strip()
+    if not include_timestamp:
+        return clean_body
+
+    marker = format_timestamp_marker(dt)
+    if not clean_body:
+        return marker
+    return f"{marker}\n{clean_body}"

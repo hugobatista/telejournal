@@ -4,9 +4,9 @@ Telegram bot that journals every private message into Obsidian daily notes.
 
 ## Features
 
-- Private chat journal capture for text, photos, and locations
+- Private chat journal capture for text, photos, voice recordings, video messages (including circular video notes), and locations
 - UTC daily note partitioning at `YYYY/YYYY-MM-DD.md`
-- Photo storage in `YYYY/attachments/`
+- Media storage (photos, voice, video) in `YYYY/attachments/`
 - YAML frontmatter management for `mood`, `tags`, and `created`
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
@@ -41,8 +41,3 @@ uv run pytest
 bash validate.sh
 ```
 
-## Quality Metrics
-
-- **Test Coverage**: 100% line coverage (516/516 statements)
-- **Type Safety**: Strict mypy with disallow_untyped_defs
-- **Tests**: 53 passing unit tests covering all branches and error paths

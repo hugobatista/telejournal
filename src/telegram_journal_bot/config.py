@@ -13,22 +13,22 @@ class Settings:
 
     telegram_token: str
     vault_root: Path
+    allowed_user_ids: set[int]
     log_level: str = "INFO"
-    allowed_user_ids: set[int] | None = None
+    message_timestamp_window_seconds: int = 60
 
 
-def _parse_allowed_user_ids(raw_value: str | None) -> set[int] | None:
-    """Parse optional comma-separated Telegram user IDs."""
-    if not raw_value:
-        return None
-
+def _parse_allowed_user_ids(raw_value: str) -> set[int]:
+    """Parse comma-separated Telegram user IDs."""
     parsed: set[int] = set()
     for part in raw_value.split(","):
         value = part.strip()
         if not value:
             continue
         parsed.add(int(value))
-    return parsed or None
+    if not parsed:
+        raise ValueError("TELEGRAM_ALLOWED_USER_IDS must contain at least one valid user ID")
+    return parsed
 
 
 def load_settings() -> Settings:
@@ -44,12 +44,22 @@ def load_settings() -> Settings:
     vault_root = Path(vault_root_raw).expanduser().resolve()
     vault_root.mkdir(parents=True, exist_ok=True)
 
+    allowed_user_ids_raw = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip()
+    if not allowed_user_ids_raw:
+        raise ValueError("TELEGRAM_ALLOWED_USER_IDS is required")
+    allowed_user_ids = _parse_allowed_user_ids(allowed_user_ids_raw)
+
     log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
-    allowed_user_ids = _parse_allowed_user_ids(os.getenv("TELEGRAM_ALLOWED_USER_IDS"))
+    window_seconds = int(
+        os.getenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "60").strip() or "60"
+    )
+    if window_seconds < 0:
+        raise ValueError("MESSAGE_TIMESTAMP_WINDOW_SECONDS must be >= 0")
 
     return Settings(
         telegram_token=token,
         vault_root=vault_root,
-        log_level=log_level,
         allowed_user_ids=allowed_user_ids,
+        log_level=log_level,
+        message_timestamp_window_seconds=window_seconds,
     )

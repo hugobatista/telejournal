@@ -46,13 +46,11 @@ def should_prompt_for_mood(
     *,
     note_has_entry: bool,
     note_has_mood: bool,
-    last_entry_at: datetime | None,
     now: datetime,
     last_prompted_at: datetime | None,
     reminder_interval_hours: int = 4,
 ) -> bool:
     """Decide whether a mood prompt should be sent for the chat."""
-    del last_entry_at
     if not note_has_entry or note_has_mood:
         return False
 

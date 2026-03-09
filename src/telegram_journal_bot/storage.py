@@ -14,11 +14,11 @@ from typing import Any
 
 import aiofiles
 import yaml
-from telegram import PhotoSize
+from telegram import PhotoSize, Video, VideoNote, Voice
 
 LOGGER = logging.getLogger(__name__)
 _TIMESTAMP_RE = re.compile(
-    r"^\s*(?:-\s*)?(?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?"
+    r"^\s*(?:%%\s*)?(?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?(?:\s*%%)?"
 )
 
 
@@ -65,6 +65,7 @@ class VaultRepository:
 
         return {
             "mood": None,
+            "location": None,
             "tags": ["journal"],
             "created": start_of_day.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
@@ -138,6 +139,8 @@ class VaultRepository:
         note_dt: datetime,
         entry: str,
         frontmatter_updates: dict[str, Any] | None = None,
+        *,
+        as_continuation: bool = False,
     ) -> Path:
         """Append a journal entry to a daily note and update frontmatter."""
         note_path = self.get_note_path(note_dt)
@@ -150,10 +153,13 @@ class VaultRepository:
             if frontmatter_updates:
                 frontmatter.update(frontmatter_updates)
 
-            body_parts = [
-                part for part in [note_data.body.rstrip(), entry.strip()] if part
-            ]
-            next_body = "\n\n".join(body_parts)
+            current_body = note_data.body.rstrip()
+            clean_entry = entry.strip()
+            if as_continuation and current_body and clean_entry:
+                next_body = f"{current_body}\n{clean_entry}"
+            else:
+                body_parts = [part for part in [current_body, clean_entry] if part]
+                next_body = "\n\n".join(body_parts)
 
             await self._write_note(note_path, frontmatter, next_body)
 
@@ -175,6 +181,15 @@ class VaultRepository:
             await self._write_note(note_path, frontmatter, note_data.body)
         return note_path
 
+    async def get_note_content(self, note_dt: datetime) -> str | None:
+        """Return full markdown note content for a date, if the note exists."""
+        note_path = self.get_note_path(note_dt)
+        if not note_path.exists():
+            return None
+
+        async with aiofiles.open(note_path, "r", encoding="utf-8") as handle:
+            return await handle.read()
+
     async def delete_last_entry(self, note_dt: datetime) -> str | None:
         """Delete the last body entry block and return removed content."""
         note_path = self.get_note_path(note_dt)
@@ -186,13 +201,31 @@ class VaultRepository:
                 return None
 
             entries = [entry for entry in body.split("\n\n") if entry.strip()]
-            if not entries:
-                return None
-
             removed = entries.pop().strip()
             next_body = "\n\n".join(entries)
             await self._write_note(note_path, note_data.frontmatter, next_body)
             return removed
+
+    async def peek_last_entry(self, note_dt: datetime) -> str | None:
+        """Return last body entry block without mutating the note."""
+        note_path = self.get_note_path(note_dt)
+        note_data = await self._read_note(note_path)
+        body = note_data.body.strip()
+        if not body:
+            return None
+
+        entries = [entry for entry in body.split("\n\n") if entry.strip()]
+        return entries[-1].strip()
+
+    async def delete_day(self, note_dt: datetime) -> bool:
+        """Delete full day note file and return whether it existed."""
+        note_path = self.get_note_path(note_dt)
+        lock = self._locks[note_path]
+        async with lock:
+            if not note_path.exists():
+                return False
+            await asyncio.to_thread(note_path.unlink)
+            return True
 
     async def note_has_entry(self, note_dt: datetime) -> bool:
         """Return whether a note contains at least one body entry."""
@@ -264,5 +297,68 @@ class VaultRepository:
             counter += 1
 
         tg_file = await photo.get_file()
+        await tg_file.download_to_drive(output_path)
+        return f"{note_dt.year}/attachments/{filename}"
+
+    async def save_voice(
+        self,
+        voice: Voice,
+        note_dt: datetime,
+        ts: str,
+    ) -> str:
+        """Download a voice message and return Obsidian embed path."""
+        attachments_dir = self._get_attachments_dir(note_dt)
+        filename = f"{ts}.ogg"
+        output_path = attachments_dir / filename
+
+        counter = 1
+        while output_path.exists():
+            filename = f"{ts}_{counter}.ogg"
+            output_path = attachments_dir / filename
+            counter += 1
+
+        tg_file = await voice.get_file()
+        await tg_file.download_to_drive(output_path)
+        return f"{note_dt.year}/attachments/{filename}"
+
+    async def save_video(
+        self,
+        video: Video,
+        note_dt: datetime,
+        ts: str,
+    ) -> str:
+        """Download a video message and return Obsidian embed path."""
+        attachments_dir = self._get_attachments_dir(note_dt)
+        filename = f"{ts}.mp4"
+        output_path = attachments_dir / filename
+
+        counter = 1
+        while output_path.exists():
+            filename = f"{ts}_{counter}.mp4"
+            output_path = attachments_dir / filename
+            counter += 1
+
+        tg_file = await video.get_file()
+        await tg_file.download_to_drive(output_path)
+        return f"{note_dt.year}/attachments/{filename}"
+
+    async def save_video_note(
+        self,
+        video_note: VideoNote,
+        note_dt: datetime,
+        ts: str,
+    ) -> str:
+        """Download a video note (circular video) and return Obsidian embed path."""
+        attachments_dir = self._get_attachments_dir(note_dt)
+        filename = f"{ts}_note.mp4"
+        output_path = attachments_dir / filename
+
+        counter = 1
+        while output_path.exists():
+            filename = f"{ts}_note_{counter}.mp4"
+            output_path = attachments_dir / filename
+            counter += 1
+
+        tg_file = await video_note.get_file()
         await tg_file.download_to_drive(output_path)
         return f"{note_dt.year}/attachments/{filename}"

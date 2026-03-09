@@ -14,12 +14,16 @@ from telegram.constants import ChatType
 from telegram_journal_bot.bot import (
     ACTIVE_CHATS_KEY,
     ALBUMS_KEY,
+    DELETE_CALLBACK_PREFIX,
     LAST_PROMPT_AT_KEY,
+    LAST_WINDOW_AT_KEY,
     MOOD_CALLBACK_PREFIX,
     TAG_CALLBACK_PREFIX,
     JournalBot,
+    _extract_mood_value,
     _mood_keyboard,
     _tags_keyboard,
+    _truncate_message,
 )
 from telegram_journal_bot.config import Settings
 
@@ -59,8 +63,14 @@ def journal_bot(tmp_path: Path) -> JournalBot:
     bot = JournalBot(Settings("token", tmp_path))
     bot._repository = SimpleNamespace(  # type: ignore[assignment]
         append_entry=AsyncMock(),
-        delete_last_entry=AsyncMock(return_value="- 18:34:42 > hello"),
+        delete_last_entry=AsyncMock(return_value="%% 18:34:42 %%\nhello"),
+        delete_day=AsyncMock(return_value=True),
+        peek_last_entry=AsyncMock(return_value="%% 18:34:42 %%\nhello"),
+        get_note_content=AsyncMock(return_value="---\nmood: 3\n---\n\n%% 18:00:00 %%\nhi\n"),
         save_photo=AsyncMock(return_value="2026/attachments/ts.jpg"),
+        save_voice=AsyncMock(return_value="2026/attachments/voice.ogg"),
+        save_video=AsyncMock(return_value="2026/attachments/video.mp4"),
+        save_video_note=AsyncMock(return_value="2026/attachments/video_note.mp4"),
         get_note_frontmatter=AsyncMock(
             return_value={"tags": ["journal", "work"], "mood": None}
         ),
@@ -98,6 +108,9 @@ def _private_update(
     text: str | None = "hi",
     caption: str | None = None,
     photo: list[object] | None = None,
+    voice: object | None = None,
+    video: object | None = None,
+    video_note: object | None = None,
     location: object | None = None,
     media_group_id: str | None = None,
     callback_data: str | None = None,
@@ -110,6 +123,9 @@ def _private_update(
         text_markdown_urled=text,
         caption_markdown_urled=caption,
         photo=photo,
+        voice=voice,
+        video=video,
+        video_note=video_note,
         location=location,
         media_group_id=media_group_id,
         message_id=message_id,
@@ -142,8 +158,9 @@ async def test_help_mood_setdate_resetdate_commands(journal_bot: JournalBot) -> 
     await journal_bot.setdate_command(update, context)  # type: ignore
     await journal_bot.resetdate_command(update, context)  # type: ignore
     await journal_bot.delete_command(update, context)  # type: ignore
+    await journal_bot.show_command(update, context)  # type: ignore
 
-    assert update.effective_message.reply_text.await_count == 5
+    assert update.effective_message.reply_text.await_count == 6
 
 
 @pytest.mark.asyncio
@@ -202,6 +219,24 @@ async def test_handle_text_location_photo_and_album(journal_bot: JournalBot) -> 
     photo_update = _private_update(text=None, photo=[_Photo()])
     await journal_bot.handle_journal_entry(photo_update, context)
 
+    voice_update = _private_update(
+        text=None,
+        voice=SimpleNamespace(get_file=AsyncMock()),
+    )
+    await journal_bot.handle_journal_entry(voice_update, context)
+
+    video_update = _private_update(
+        text=None,
+        video=SimpleNamespace(get_file=AsyncMock()),
+    )
+    await journal_bot.handle_journal_entry(video_update, context)
+
+    video_note_update = _private_update(
+        text=None,
+        video_note=SimpleNamespace(get_file=AsyncMock()),
+    )
+    await journal_bot.handle_journal_entry(video_note_update, context)
+
     album_update = _private_update(
         text=None,
         caption="album",
@@ -212,6 +247,42 @@ async def test_handle_text_location_photo_and_album(journal_bot: JournalBot) -> 
 
     assert journal_bot._repository.append_entry.await_count >= 3  # type: ignore
     assert context.job_queue.once_jobs
+
+
+@pytest.mark.asyncio
+async def test_message_timestamp_window(journal_bot: JournalBot) -> None:
+    """Messages in the same window should suppress repeated timestamp prefixes."""
+    context = _context()
+
+    first = _private_update(text="first")
+    await journal_bot.handle_journal_entry(first, context)
+
+    second = _private_update(text="second")
+    await journal_bot.handle_journal_entry(second, context)
+
+    entries = [
+        call.args[1]
+        for call in journal_bot._repository.append_entry.await_args_list[:2]  # type: ignore
+    ]
+    assert entries[0].startswith("%% ")
+    assert "\nfirst" in entries[0]
+    assert entries[1] == "second"
+
+
+@pytest.mark.asyncio
+async def test_message_timestamp_window_rollover(journal_bot: JournalBot) -> None:
+    """Timestamp should reset when window threshold is exceeded."""
+    context = _context()
+    now = datetime.now(UTC)
+    context.chat_data[LAST_WINDOW_AT_KEY] = now - timedelta(seconds=61)
+    context.chat_data["last_window_note"] = now.strftime("%Y-%m-%d")
+
+    update = _private_update(text="new window")
+    await journal_bot.handle_journal_entry(update, context)
+
+    entry = journal_bot._repository.append_entry.await_args.args[1]  # type: ignore
+    assert entry.startswith("%% ")
+    assert entry.endswith("\nnew window")
 
 
 @pytest.mark.asyncio
@@ -255,6 +326,114 @@ async def test_setdate_uses_date_scoped_mood_prompt(journal_bot: JournalBot) -> 
 
     replies = [call.args[0] for call in update.effective_message.reply_text.await_args_list]
     assert "How are you feeling today?" in replies
+
+
+@pytest.mark.asyncio
+async def test_delete_command_replies_with_deleted_entry(journal_bot: JournalBot) -> None:
+    """Delete command without args should request confirmation first."""
+    context = _context()
+    update = _private_update()
+
+    await journal_bot.delete_command(update, context)
+
+    text = update.effective_message.reply_text.await_args.args[0]
+    assert "Confirm deleting the last entry" in text
+    assert "18:34:42" in text
+    assert update.effective_message.reply_text.await_args.kwargs["reply_markup"]
+
+
+@pytest.mark.asyncio
+async def test_delete_command_day_argument(journal_bot: JournalBot) -> None:
+    """Delete day command should request confirmation first."""
+    context = _context(args=["day", "2026-03-06"])
+    update = _private_update()
+
+    await journal_bot.delete_command(update, context)
+
+    assert journal_bot._repository.delete_day.await_count == 0  # type: ignore
+    assert "Confirm deleting day 2026-03-06" in update.effective_message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_show_command_specific_day(journal_bot: JournalBot) -> None:
+    """Show command should render a requested day note."""
+    context = _context(args=["2026-03-06"])
+    update = _private_update()
+
+    await journal_bot.show_command(update, context)
+
+    assert journal_bot._repository.get_note_content.await_count == 1  # type: ignore
+    assert "mood: 3" in update.effective_message.reply_text.await_args.args[0]
+
+
+def test_extract_mood_value_legacy_shapes() -> None:
+    """Mood extractor should support int, dict, list and invalid values."""
+    assert _extract_mood_value(None) is None
+    assert _extract_mood_value(3) == 3
+    assert _extract_mood_value({"value": 4}) == 4
+    assert _extract_mood_value([{"value": 2}, {"value": 5}]) == 5
+    assert _extract_mood_value([{"value": "x"}]) is None
+
+
+def test_truncate_message_branch() -> None:
+    """Long strings should be truncated and short strings should pass through."""
+    assert _truncate_message("abc", max_len=10) == "abc"
+    assert _truncate_message("x" * 20, max_len=10).endswith("...")
+
+
+@pytest.mark.asyncio
+async def test_show_command_error_paths(journal_bot: JournalBot) -> None:
+    """Show command should validate args and handle missing note content."""
+    update = _private_update()
+
+    context_many = _context(args=["2026-01-01", "extra"])
+    await journal_bot.show_command(update, context_many)
+    assert "Use: /show" in update.effective_message.reply_text.await_args.args[0]
+
+    context_bad = _context(args=["bad"])
+    await journal_bot.show_command(update, context_bad)
+    assert "Use: /show" in update.effective_message.reply_text.await_args.args[0]
+
+    journal_bot._repository.get_note_content = AsyncMock(return_value=None)  # type: ignore
+    context_missing = _context(args=["2026-03-06"])
+    await journal_bot.show_command(update, context_missing)
+    assert "No note found" in update.effective_message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_show_command_returns_when_message_missing(journal_bot: JournalBot) -> None:
+    """Show command should no-op when effective_message is unavailable."""
+    update = _private_update()
+    update.effective_message = None
+    await journal_bot.show_command(update, _context())
+
+
+@pytest.mark.asyncio
+async def test_delete_command_error_paths(journal_bot: JournalBot) -> None:
+    """Delete command should validate args and surface missing day/note paths."""
+    update = _private_update()
+
+    journal_bot._repository.peek_last_entry = AsyncMock(return_value=None)  # type: ignore
+    await journal_bot.delete_command(update, _context())
+    assert "No entries to delete" in update.effective_message.reply_text.await_args.args[0]
+
+    await journal_bot.delete_command(update, _context(args=["nope"]))
+    assert "Use: /delete" in update.effective_message.reply_text.await_args.args[0]
+
+    await journal_bot.delete_command(update, _context(args=["day", "bad"]))
+    assert "Use: /delete day" in update.effective_message.reply_text.await_args.args[0]
+
+    journal_bot._repository.get_note_content = AsyncMock(return_value=None)  # type: ignore
+    await journal_bot.delete_command(update, _context(args=["day"]))
+    assert "No note found" in update.effective_message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_delete_command_returns_when_message_missing(journal_bot: JournalBot) -> None:
+    """Delete command should no-op when effective_message is unavailable."""
+    update = _private_update()
+    update.effective_message = None
+    await journal_bot.delete_command(update, _context())
 
 
 @pytest.mark.asyncio
@@ -357,9 +536,10 @@ async def test_handle_error_and_auth_rejections(journal_bot: JournalBot) -> None
 def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
     """Keyboard builders and handler registrations should be stable."""
     mood_markup = _mood_keyboard()
-    tags_markup = _tags_keyboard({"journal"})
+    tags_markup = _tags_keyboard({"family"})
     assert mood_markup.inline_keyboard
     assert tags_markup.inline_keyboard
+    assert tags_markup.inline_keyboard[0][0].text.startswith("✅")
 
     handlers: list[object] = []
     errors: list[object] = []
@@ -419,6 +599,7 @@ async def test_unauthorized_early_returns_cover_branches(
     await journal_bot.resetdate_command(update, context)
     await journal_bot.mood_command(update, context)
     await journal_bot.delete_command(update, context)
+    await journal_bot.show_command(update, context)
     await journal_bot.tags_command(update, context)
     await journal_bot.handle_journal_entry(update, context)
 
@@ -437,10 +618,39 @@ async def test_photo_and_flush_defensive_branches(
     context = _context()
 
     update_no_message = SimpleNamespace(effective_message=None, effective_chat=None)
-    await journal_bot._handle_photo(update_no_message, context, datetime.now(UTC))
+    await journal_bot._handle_photo(
+        update_no_message,
+        context,
+        datetime.now(UTC),
+        True,
+    )
 
     update_no_photo = _private_update(text=None, photo=[])
-    await journal_bot._handle_photo(update_no_photo, context, datetime.now(UTC))
+    await journal_bot._handle_photo(update_no_photo, context, datetime.now(UTC), True)
+
+    update_no_voice = _private_update(text=None, voice=None)
+    assert not await journal_bot._handle_voice(
+        update_no_voice,
+        context,
+        datetime.now(UTC),
+        True,
+    )
+
+    update_no_video = _private_update(text=None, video=None)
+    assert not await journal_bot._handle_video(
+        update_no_video,
+        context,
+        datetime.now(UTC),
+        True,
+    )
+
+    update_no_video_note = _private_update(text=None, video_note=None)
+    assert not await journal_bot._handle_video_note(
+        update_no_video_note,
+        context,
+        datetime.now(UTC),
+        True,
+    )
 
     class _Photo:
         async def get_file(self) -> object:
@@ -453,7 +663,7 @@ async def test_photo_and_flush_defensive_branches(
         photo=[_Photo()],
         media_group_id="group-x",
     )
-    await journal_bot._handle_photo(album_update, context, datetime.now(UTC))
+    await journal_bot._handle_photo(album_update, context, datetime.now(UTC), True)
 
     await journal_bot.flush_album_entry(_context())
 
@@ -484,6 +694,106 @@ async def test_photo_and_flush_defensive_branches(
         1: {ALBUMS_KEY: {"x": {"note_dt": "bad", "images": []}}}
     }
     await journal_bot.flush_album_entry(invalid_note_state)
+
+
+@pytest.mark.asyncio
+async def test_should_include_timestamp_zero_window(journal_bot: JournalBot) -> None:
+    """Zero/negative window should always include timestamp and refresh state."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        message_timestamp_window_seconds=0,
+    )
+    chat_data: dict[str, Any] = {}
+    now = datetime.now(UTC)
+    include = journal_bot._should_include_timestamp(chat_data, now, now)
+    assert include
+    assert LAST_WINDOW_AT_KEY in chat_data
+
+
+@pytest.mark.asyncio
+async def test_flush_album_without_timestamp_marker(journal_bot: JournalBot) -> None:
+    """Album flush should strip timestamp prefix when grouped messages share window."""
+    context = _context()
+    context.job = SimpleNamespace(data={"chat_id": 1, "media_group_id": "x"})
+    context.application.chat_data = {
+        1: {
+            ALBUMS_KEY: {
+                "x": {
+                    "note_dt": datetime(2026, 3, 7, 18, 34, tzinfo=UTC),
+                    "caption": "caption",
+                    "images": ["![[a.jpg]]"],
+                    "include_timestamp": False,
+                }
+            }
+        }
+    }
+    await journal_bot.flush_album_entry(context)
+    entry = journal_bot._repository.append_entry.await_args.args[1]  # type: ignore
+    assert entry.startswith("caption")
+
+
+@pytest.mark.asyncio
+async def test_callback_router_delete_confirm_and_cancel(journal_bot: JournalBot) -> None:
+    """Delete callbacks should apply confirmed action and support cancel."""
+    context = _context()
+
+    cancel_update = _private_update(callback_data=f"{DELETE_CALLBACK_PREFIX}cancel")
+    await journal_bot.callback_router(cancel_update, context)
+    assert "Deletion canceled" in cancel_update.callback_query.edit_message_text.await_args.args[0]
+
+    confirm_last = _private_update(
+        callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last:2026-03-07"
+    )
+    await journal_bot.callback_router(confirm_last, context)
+    assert journal_bot._repository.delete_last_entry.await_count >= 1  # type: ignore
+
+    confirm_day = _private_update(
+        callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:day:2026-03-07"
+    )
+    await journal_bot.callback_router(confirm_day, context)
+    assert journal_bot._repository.delete_day.await_count >= 1  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_callback_router_delete_confirm_error_paths(journal_bot: JournalBot) -> None:
+    """Delete callbacks should ignore invalid payloads and handle missing targets."""
+    context = _context()
+
+    invalid_shape = _private_update(callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last")
+    await journal_bot.callback_router(invalid_shape, context)
+
+    invalid_date = _private_update(
+        callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last:not-a-date"
+    )
+    await journal_bot.callback_router(invalid_date, context)
+
+    journal_bot._repository.delete_last_entry = AsyncMock(return_value=None)  # type: ignore
+    no_last = _private_update(
+        callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:last:2026-03-07"
+    )
+    await journal_bot.callback_router(no_last, context)
+    assert "No entries to delete" in no_last.callback_query.edit_message_text.await_args.args[0]
+
+    journal_bot._repository.delete_day = AsyncMock(return_value=False)  # type: ignore
+    no_day = _private_update(
+        callback_data=f"{DELETE_CALLBACK_PREFIX}confirm:day:2026-03-07"
+    )
+    await journal_bot.callback_router(no_day, context)
+    assert "No note found" in no_day.callback_query.edit_message_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_callback_router_mood_change_from_previous(journal_bot: JournalBot) -> None:
+    """Mood callback should record explicit mood change when previous mood exists."""
+    journal_bot._repository.get_note_frontmatter = AsyncMock(  # type: ignore
+        return_value={"tags": ["journal"], "mood": 3}
+    )
+    context = _context()
+    update = _private_update(callback_data=f"{MOOD_CALLBACK_PREFIX}4")
+    await journal_bot.callback_router(update, context)
+    entry = journal_bot._repository.append_entry.await_args.args[1]  # type: ignore
+    assert "Mood changed" in entry
 
 
 @pytest.mark.asyncio

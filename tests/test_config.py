@@ -50,6 +50,7 @@ def test_load_settings_builds_defaults(
     monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1, 2")
+    monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "90")
 
     settings = load_settings()
 
@@ -57,3 +58,30 @@ def test_load_settings_builds_defaults(
     assert settings.vault_root.exists()
     assert settings.log_level == "DEBUG"
     assert settings.allowed_user_ids == {1, 2}
+    assert settings.message_timestamp_window_seconds == 90
+
+
+def test_load_settings_defaults_window_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Window setting should default to 60 seconds when absent."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.delenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", raising=False)
+
+    settings = load_settings()
+    assert settings.message_timestamp_window_seconds == 60
+
+
+def test_load_settings_rejects_negative_window_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Negative window values should fail fast."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "-1")
+
+    with pytest.raises(ValueError, match="MESSAGE_TIMESTAMP_WINDOW_SECONDS"):
+        load_settings()

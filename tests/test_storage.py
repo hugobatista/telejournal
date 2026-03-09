@@ -20,13 +20,17 @@ async def test_append_entry_creates_note_with_defaults(tmp_path: Path) -> None:
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    note_path = await repo.append_entry(note_dt, "- 18:34:42 > First entry #journal")
+    note_path = await repo.append_entry(
+        note_dt,
+        "%% 18:34:42 %%\nFirst entry #journal",
+    )
     content = note_path.read_text(encoding="utf-8")
 
     assert "mood: null" in content
+    assert "location: null" in content
     assert "tags:" in content
     assert "- journal" in content
-    assert "- 18:34:42 > First entry #journal" in content
+    assert "%% 18:34:42 %%\nFirst entry #journal" in content
 
 
 @pytest.mark.asyncio
@@ -35,7 +39,7 @@ async def test_frontmatter_updates_preserve_body(tmp_path: Path) -> None:
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    await repo.append_entry(note_dt, "- 18:34:42 > Body")
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nBody")
     note_path = await repo.update_frontmatter(
         note_dt,
         {"mood": 4, "tags": ["journal", "work"]},
@@ -44,7 +48,7 @@ async def test_frontmatter_updates_preserve_body(tmp_path: Path) -> None:
     content = note_path.read_text(encoding="utf-8")
     assert "mood: 4" in content
     assert "- work" in content
-    assert "- 18:34:42 > Body" in content
+    assert "%% 18:34:42 %%\nBody" in content
 
 
 @pytest.mark.asyncio
@@ -53,8 +57,8 @@ async def test_get_last_entry_time_reads_latest_timestamp(tmp_path: Path) -> Non
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    await repo.append_entry(note_dt, "- 18:34:42 > One")
-    await repo.append_entry(note_dt, "- 19:15:07 > Two")
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nOne")
+    await repo.append_entry(note_dt, "%% 19:15:07 %%\nTwo")
 
     last = await repo.get_last_entry_time(note_dt)
     assert last == datetime(2026, 3, 7, 19, 15, 7, tzinfo=UTC)
@@ -72,6 +76,7 @@ async def test_note_path_and_frontmatter_helpers(tmp_path: Path) -> None:
 
     fm = await repo.get_note_frontmatter(note_dt)
     assert fm["mood"] is None
+    assert fm["location"] is None
     assert fm["tags"] == ["journal"]
 
 
@@ -86,7 +91,7 @@ async def test_note_presence_and_mood_checks(tmp_path: Path) -> None:
 
     await repo.append_entry(
         note_dt,
-        "- 18:34:42 > hi",
+        "%% 18:34:42 %%\nhi",
         {"mood": 3},
     )
     assert await repo.note_has_entry(note_dt)
@@ -157,7 +162,7 @@ async def test_append_entry_with_frontmatter_updates(tmp_path: Path) -> None:
 
     note_path = await repo.append_entry(
         note_dt,
-        "- 18:34:42 > merged",
+        "%% 18:34:42 %%\nmerged",
         {
             "tags": ["journal", "work"],
             "mood": 4,
@@ -169,21 +174,51 @@ async def test_append_entry_with_frontmatter_updates(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_append_entry_continuation_adds_single_line_break(tmp_path: Path) -> None:
+    """Continuation appends should extend the last entry block, not add bullets."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nfirst")
+    await repo.append_entry(note_dt, "second", as_continuation=True)
+
+    content = repo.get_note_path(note_dt).read_text(encoding="utf-8")
+    assert "%% 18:34:42 %%\nfirst\nsecond" in content
+    assert "first\n\nsecond" not in content
+
+
+@pytest.mark.asyncio
+async def test_peek_last_entry(tmp_path: Path) -> None:
+    """Peek helper should return last entry without removing it."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    assert await repo.peek_last_entry(note_dt) is None
+
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\none")
+    await repo.append_entry(note_dt, "%% 18:35:00 %%\ntwo")
+
+    peeked = await repo.peek_last_entry(note_dt)
+    assert peeked == "%% 18:35:00 %%\ntwo"
+    assert await repo.delete_last_entry(note_dt) == "%% 18:35:00 %%\ntwo"
+
+
+@pytest.mark.asyncio
 async def test_delete_last_entry_removes_tail_block(tmp_path: Path) -> None:
     """Delete helper should remove the last entry block from note body."""
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
 
-    await repo.append_entry(note_dt, "- 18:34:42 > one")
-    await repo.append_entry(note_dt, "- 18:35:00 > two")
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\none")
+    await repo.append_entry(note_dt, "%% 18:35:00 %%\ntwo")
 
     removed = await repo.delete_last_entry(note_dt)
-    assert removed == "- 18:35:00 > two"
+    assert removed == "%% 18:35:00 %%\ntwo"
 
     note_path = repo.get_note_path(note_dt)
     content = note_path.read_text(encoding="utf-8")
-    assert "- 18:34:42 > one" in content
-    assert "- 18:35:00 > two" not in content
+    assert "%% 18:34:42 %%\none" in content
+    assert "%% 18:35:00 %%\ntwo" not in content
 
 
 @pytest.mark.asyncio
@@ -192,3 +227,102 @@ async def test_delete_last_entry_none_when_empty(tmp_path: Path) -> None:
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
     assert await repo.delete_last_entry(note_dt) is None
+
+
+@pytest.mark.asyncio
+async def test_get_note_content_and_missing(tmp_path: Path) -> None:
+    """Content helper should return text for existing note and None otherwise."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    assert await repo.get_note_content(note_dt) is None
+
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nhello")
+    content = await repo.get_note_content(note_dt)
+    assert content is not None
+    assert "hello" in content
+
+
+@pytest.mark.asyncio
+async def test_delete_day(tmp_path: Path) -> None:
+    """Delete day should remove note file and report missing days as False."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    assert not await repo.delete_day(note_dt)
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nhello")
+    assert await repo.delete_day(note_dt)
+    assert not repo.get_note_path(note_dt).exists()
+
+
+@pytest.mark.asyncio
+async def test_note_has_mood_handles_legacy_shapes(tmp_path: Path) -> None:
+    """Mood detector should support list/dict legacy frontmatter shapes."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    await repo.append_entry(
+        note_dt,
+        "%% 18:34:42 %%\nlist mood",
+        {"mood": [{"value": 2}]},
+    )
+    assert await repo.note_has_mood(note_dt)
+
+    await repo.update_frontmatter(note_dt, {"mood": {"value": 4}})
+    assert await repo.note_has_mood(note_dt)
+
+    await repo.update_frontmatter(note_dt, {"mood": {"value": "x"}})
+    assert not await repo.note_has_mood(note_dt)
+
+    await repo.update_frontmatter(note_dt, {"mood": [{"value": "x"}]})
+    assert not await repo.note_has_mood(note_dt)
+
+
+@pytest.mark.asyncio
+async def test_save_voice_collision_suffix(tmp_path: Path) -> None:
+    """Voice writer should suffix duplicate filenames."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    year = tmp_path / "2026" / "attachments"
+    year.mkdir(parents=True, exist_ok=True)
+    (year / "20260307_183442.ogg").write_text("x", encoding="utf-8")
+
+    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    voice = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
+
+    rel_path = await repo.save_voice(voice, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    assert rel_path.endswith("20260307_183442_1.ogg")
+
+
+@pytest.mark.asyncio
+async def test_save_video_collision_suffix(tmp_path: Path) -> None:
+    """Video writer should suffix duplicate filenames."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    year = tmp_path / "2026" / "attachments"
+    year.mkdir(parents=True, exist_ok=True)
+    (year / "20260307_183442.mp4").write_text("x", encoding="utf-8")
+
+    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    video = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
+
+    rel_path = await repo.save_video(video, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    assert rel_path.endswith("20260307_183442_1.mp4")
+
+
+@pytest.mark.asyncio
+async def test_save_video_note_collision_suffix(tmp_path: Path) -> None:
+    """Video note writer should suffix duplicate filenames."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    year = tmp_path / "2026" / "attachments"
+    year.mkdir(parents=True, exist_ok=True)
+    (year / "20260307_183442_note.mp4").write_text("x", encoding="utf-8")
+
+    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    video_note = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
+
+    rel_path = await repo.save_video_note(video_note, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    assert rel_path.endswith("20260307_183442_note_1.mp4")
