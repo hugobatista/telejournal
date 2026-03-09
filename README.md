@@ -21,8 +21,7 @@ Create a `.env` file:
 TELEGRAM_TOKEN=your_bot_token
 VAULT_ROOT=/path/to/obsidian/vault
 LOG_LEVEL=INFO
-# Optional comma-separated Telegram user IDs
-# TELEGRAM_ALLOWED_USER_IDS=123456,987654
+TELEGRAM_ALLOWED_USER_IDS=123456,987654
 ```
 
 ## Run
@@ -30,6 +29,13 @@ LOG_LEVEL=INFO
 ```bash
 uv sync --extra dev
 uv run telegram-bot
+```
+
+Note: If you use linux secret service, namely `secret-tool`, you can skip the `.env` file step and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run) to automatically load secrets from your vault.
+
+```bash
+# Run with secrets from vault
+secret-tool-run uv run telegram-bot
 ```
 
 ## Test
