@@ -11,7 +11,7 @@ from telegram.ext import Application
 from telegram_journal_bot.bot import JournalBot
 from telegram_journal_bot.config import load_settings
 
-__all__ = ["Application", "main", "run"]
+__all__ = ["main", "run"]
 
 
 def _configure_logging(log_level: str) -> None:

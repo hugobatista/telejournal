@@ -10,7 +10,6 @@ from telegram_journal_bot.logic import (
     effective_note_datetime,
     parse_setdate_args,
     should_prompt_for_mood,
-    today_utc,
 )
 
 
@@ -115,8 +114,3 @@ def test_should_not_prompt_too_soon_after_prompt() -> None:
         now=now,
         last_prompted_at=now - timedelta(hours=1),
     )
-
-
-def test_today_utc_returns_date() -> None:
-    """Helper should always return a date instance."""
-    assert hasattr(today_utc(), "year")

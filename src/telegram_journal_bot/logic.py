@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 
 def parse_setdate_args(args: list[str], now: datetime) -> datetime:
@@ -59,8 +59,3 @@ def should_prompt_for_mood(
         return True
 
     return now - last_prompted_at >= threshold
-
-
-def today_utc() -> date:
-    """Return the current UTC date."""
-    return datetime.now(UTC).date()

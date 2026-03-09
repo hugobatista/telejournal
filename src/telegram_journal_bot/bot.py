@@ -41,7 +41,7 @@ from telegram_journal_bot.logic import (
 )
 from telegram_journal_bot.storage import VaultRepository
 
-__all__ = ["JournalBot", "Update"]
+__all__ = ["JournalBot"]
 
 LOGGER = logging.getLogger(__name__)
 
