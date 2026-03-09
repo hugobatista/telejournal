@@ -475,7 +475,8 @@ async def test_callback_router_mood_and_tags(journal_bot: JournalBot) -> None:
     invalid_mood_update = _private_update(callback_data=f"{MOOD_CALLBACK_PREFIX}x")
     await journal_bot.callback_router(invalid_mood_update, context)
 
-    tags_update = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}add:personal")
+    # SECURITY: Use valid tag from TAG_CHOICES for callback
+    tags_update = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}add:hobby")
     await journal_bot.callback_router(tags_update, context)
 
     remove_update = _private_update(
@@ -1146,3 +1147,40 @@ async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
     entry_text = call_args.args[1]
     assert "> original album message" in entry_text
     assert "album caption" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_date_bounds_validation(journal_bot: JournalBot) -> None:
+    """SECURITY: _parse_iso_date should reject dates outside allowed range."""
+    from telegram_journal_bot.bot import _parse_iso_date
+    
+    # Test date too far in past (> 2 years)
+    with pytest.raises(ValueError, match="outside allowed range"):
+        _parse_iso_date("2020-01-01")
+    
+    # Test date too far in future (> 1 year)
+    with pytest.raises(ValueError, match="outside allowed range"):
+        _parse_iso_date("2030-01-01")
+
+
+@pytest.mark.asyncio
+async def test_callback_router_security_validations(journal_bot: JournalBot) -> None:
+    """SECURITY: callback_router should validate and reject invalid tag operations."""
+    context = _context()
+    
+    # Test invalid tag callback format (missing parts)
+    malformed_update = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}badformat")
+    await journal_bot.callback_router(malformed_update, context)
+    # Should return early without calling repository
+    assert journal_bot._repository.update_frontmatter.await_count == 0  # type: ignore
+    
+    # Test invalid action (not "add" or "remove")
+    invalid_action = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}delete:hobby")
+    await journal_bot.callback_router(invalid_action, context)
+    assert journal_bot._repository.update_frontmatter.await_count == 0  # type: ignore
+    
+    # Test invalid tag (not in TAG_CHOICES and not existing)
+    invalid_tag = _private_update(callback_data=f"{TAG_CALLBACK_PREFIX}add:malicious")
+    await journal_bot.callback_router(invalid_tag, context)
+    assert journal_bot._repository.update_frontmatter.await_count == 0  # type: ignore
+

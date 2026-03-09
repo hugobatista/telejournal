@@ -147,7 +147,11 @@ async def test_save_photo_collision_suffix(tmp_path: Path) -> None:
     year.mkdir(parents=True, exist_ok=True)
     (year / "20260307_183442.jpg").write_text("x", encoding="utf-8")
 
-    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    # Create mock that actually writes file to test chmod path
+    async def mock_download(path: Path) -> None:
+        path.write_text("photo_data", encoding="utf-8")
+    
+    downloader = SimpleNamespace(download_to_drive=AsyncMock(side_effect=mock_download))
     photo = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
 
     rel_path = await repo.save_photo(photo, note_dt, "20260307_183442")  # type: ignore[arg-type]
@@ -287,7 +291,11 @@ async def test_save_voice_collision_suffix(tmp_path: Path) -> None:
     year.mkdir(parents=True, exist_ok=True)
     (year / "20260307_183442.ogg").write_text("x", encoding="utf-8")
 
-    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    # Create mock that actually writes file to test chmod path
+    async def mock_download(path: Path) -> None:
+        path.write_text("voice_data", encoding="utf-8")
+    
+    downloader = SimpleNamespace(download_to_drive=AsyncMock(side_effect=mock_download))
     voice = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
 
     rel_path = await repo.save_voice(voice, note_dt, "20260307_183442")  # type: ignore[arg-type]
@@ -304,7 +312,11 @@ async def test_save_video_collision_suffix(tmp_path: Path) -> None:
     year.mkdir(parents=True, exist_ok=True)
     (year / "20260307_183442.mp4").write_text("x", encoding="utf-8")
 
-    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    # Create mock that actually writes file to test chmod path
+    async def mock_download(path: Path) -> None:
+        path.write_text("video_data", encoding="utf-8")
+    
+    downloader = SimpleNamespace(download_to_drive=AsyncMock(side_effect=mock_download))
     video = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
 
     rel_path = await repo.save_video(video, note_dt, "20260307_183442")  # type: ignore[arg-type]
@@ -321,8 +333,91 @@ async def test_save_video_note_collision_suffix(tmp_path: Path) -> None:
     year.mkdir(parents=True, exist_ok=True)
     (year / "20260307_183442_note.mp4").write_text("x", encoding="utf-8")
 
-    downloader = SimpleNamespace(download_to_drive=AsyncMock())
+    # Create mock that actually writes file to test chmod path
+    async def mock_download(path: Path) -> None:
+        path.write_text("video_note_data", encoding="utf-8")
+    
+    downloader = SimpleNamespace(download_to_drive=AsyncMock(side_effect=mock_download))
     video_note = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
 
     rel_path = await repo.save_video_note(video_note, note_dt, "20260307_183442")  # type: ignore[arg-type]
     assert rel_path.endswith("20260307_183442_note_1.mp4")
+
+
+@pytest.mark.asyncio
+async def test_secure_permissions_disabled(tmp_path: Path) -> None:
+    """Repository with secure_permissions=False should not set restrictive permissions."""
+    import stat
+    
+    # Create repository with secure permissions disabled
+    repo = VaultRepository(tmp_path, secure_permissions=False)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    
+    # Create a note
+    await repo.append_entry(note_dt, "Test entry")
+    
+    # Year directory should exist but not have restrictive permissions set by us
+    year_dir = tmp_path / "2026"
+    assert year_dir.exists()
+    # Note: We can't reliably test the exact permissions since umask affects them,
+    # but we can verify the repository doesn't error out
+    
+    # Create a photo attachment
+    async def mock_download(path: Path) -> None:
+        path.write_text("photo_data", encoding="utf-8")
+    
+    downloader = SimpleNamespace(download_to_drive=AsyncMock(side_effect=mock_download))
+    photo = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
+    
+    rel_path = await repo.save_photo(photo, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    assert rel_path.endswith("20260307_183442.jpg")
+    
+    # Verify file exists (permissions will be umask-dependent)
+    photo_path = tmp_path / "2026" / "attachments" / "20260307_183442.jpg"
+    assert photo_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_secure_permissions_enabled(tmp_path: Path) -> None:
+    """Repository with secure_permissions=True should set restrictive permissions."""
+    import stat
+    
+    # Create repository with secure permissions enabled (default)
+    repo = VaultRepository(tmp_path, secure_permissions=True)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    
+    # Verify vault root has restrictive permissions
+    vault_perms = tmp_path.stat().st_mode & 0o777
+    assert vault_perms == 0o700, f"Expected 0o700, got {oct(vault_perms)}"
+    
+    # Create a note
+    await repo.append_entry(note_dt, "Test entry")
+    
+    # Year directory should have restrictive permissions
+    year_dir = tmp_path / "2026"
+    year_perms = year_dir.stat().st_mode & 0o777
+    assert year_perms == 0o700, f"Expected 0o700, got {oct(year_perms)}"
+    
+    # Note file should have restrictive permissions
+    note_path = repo.get_note_path(note_dt)
+    note_perms = note_path.stat().st_mode & 0o777
+    assert note_perms == 0o600, f"Expected 0o600, got {oct(note_perms)}"
+    
+    # Create a photo attachment
+    async def mock_download(path: Path) -> None:
+        path.write_text("photo_data", encoding="utf-8")
+    
+    downloader = SimpleNamespace(download_to_drive=AsyncMock(side_effect=mock_download))
+    photo = SimpleNamespace(get_file=AsyncMock(return_value=downloader))
+    
+    await repo.save_photo(photo, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    
+    # Attachments directory should have restrictive permissions
+    attachments_dir = tmp_path / "2026" / "attachments"
+    attachments_perms = attachments_dir.stat().st_mode & 0o777
+    assert attachments_perms == 0o700, f"Expected 0o700, got {oct(attachments_perms)}"
+    
+    # Photo file should have restrictive permissions
+    photo_path = attachments_dir / "20260307_183442.jpg"
+    photo_perms = photo_path.stat().st_mode & 0o777
+    assert photo_perms == 0o600, f"Expected 0o600, got {oct(photo_perms)}"

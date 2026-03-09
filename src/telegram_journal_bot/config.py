@@ -16,6 +16,7 @@ class Settings:
     allowed_user_ids: set[int]
     log_level: str = "INFO"
     message_timestamp_window_seconds: int = 60
+    secure_file_permissions: bool = True
 
 
 def _parse_allowed_user_ids(raw_value: str) -> set[int]:
@@ -55,6 +56,10 @@ def load_settings() -> Settings:
     )
     if window_seconds < 0:
         raise ValueError("MESSAGE_TIMESTAMP_WINDOW_SECONDS must be >= 0")
+    
+    # SECURITY: Parse secure file permissions setting (enabled by default)
+    secure_permissions_raw = os.getenv("SECURE_FILE_PERMISSIONS", "true").strip().lower()
+    secure_permissions = secure_permissions_raw in ("true", "1", "yes", "on")
 
     return Settings(
         telegram_token=token,
@@ -62,4 +67,5 @@ def load_settings() -> Settings:
         allowed_user_ids=allowed_user_ids,
         log_level=log_level,
         message_timestamp_window_seconds=window_seconds,
+        secure_file_permissions=secure_permissions,
     )

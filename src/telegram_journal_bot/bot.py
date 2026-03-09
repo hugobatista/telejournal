@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -76,9 +76,27 @@ def _parse_tags_from_args(args: list[str]) -> set[str]:
 
 
 def _parse_iso_date(raw_date: str) -> datetime:
-    """Parse YYYY-MM-DD into a UTC datetime at midnight."""
+    """Parse YYYY-MM-DD into a UTC datetime at midnight.
+    
+    Validates that the date is within reasonable bounds:
+    - Not more than 2 years in the past
+    - Not more than 1 year in the future
+    """
     parsed_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
-    return datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=UTC)
+    result = datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=UTC)
+    
+    # SECURITY: Validate date bounds to prevent DoS via extreme dates
+    now = datetime.now(UTC)
+    min_date = now - timedelta(days=730)  # 2 years back
+    max_date = now + timedelta(days=365)  # 1 year forward
+    
+    if result < min_date or result > max_date:
+        raise ValueError(
+            f"Date {raw_date} is outside allowed range "
+            f"({min_date.date()} to {max_date.date()})"
+        )
+    
+    return result
 
 
 def _truncate_message(text: str, max_len: int = MAX_TELEGRAM_TEXT_LEN) -> str:
@@ -148,7 +166,10 @@ class JournalBot:
     def __init__(self, settings: Settings) -> None:
         """Create bot services from runtime settings."""
         self._settings = settings
-        self._repository = VaultRepository(settings.vault_root)
+        self._repository = VaultRepository(
+            settings.vault_root,
+            secure_permissions=settings.secure_file_permissions,
+        )
 
     @staticmethod
     def _chat_data(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
@@ -882,6 +903,7 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Handle mood and tag callback interactions."""
+        # SECURITY: Authorization check must be first, before any processing
         if not self._is_private_and_authorized(update):
             return
 
@@ -976,9 +998,26 @@ class JournalBot:
                 return
 
         if query.data.startswith(TAG_CALLBACK_PREFIX):
-            _, action, tag = query.data.split(":", maxsplit=2)
+            # SECURITY: Validate callback data to prevent injection
+            try:
+                _, action, tag = query.data.split(":", maxsplit=2)
+            except ValueError:
+                LOGGER.warning("Invalid tag callback data format: %s", query.data)
+                return
+            
+            # SECURITY: Whitelist validation for action
+            if action not in ("add", "remove"):
+                LOGGER.warning("Invalid tag action: %s", action)
+                return
+            
             frontmatter = await self._repository.get_note_frontmatter(note_dt)
             current_tags = set(frontmatter.get("tags") or ["journal"])
+            
+            # SECURITY: Accept tags from TAG_CHOICES or existing tags
+            # This allows removal of tags added via /tags command
+            if tag not in TAG_CHOICES and tag not in current_tags:
+                LOGGER.warning("Invalid tag value (not in choices or existing): %s", tag)
+                return
 
             if action == "add":
                 current_tags.add(tag)

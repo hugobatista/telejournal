@@ -33,10 +33,21 @@ class NoteData:
 class VaultRepository:
     """Manage journal note and attachment persistence in the vault."""
 
-    def __init__(self, vault_root: Path) -> None:
-        """Initialize a repository rooted at an Obsidian vault path."""
+    def __init__(self, vault_root: Path, secure_permissions: bool = True) -> None:
+        """Initialize a repository rooted at an Obsidian vault path.
+        
+        Args:
+            vault_root: Root directory for the Obsidian vault
+            secure_permissions: If True, set restrictive permissions (0o700/0o600) on
+                directories and files. Defaults to True for security.
+        """
         self._vault_root = vault_root
+        self._secure_permissions = secure_permissions
         self._locks: dict[Path, asyncio.Lock] = defaultdict(asyncio.Lock)
+        
+        # SECURITY: Set restrictive permissions on vault root if enabled
+        if self._secure_permissions:
+            vault_root.chmod(0o700)  # rwx------
 
     @property
     def vault_root(self) -> Path:
@@ -47,13 +58,24 @@ class VaultRepository:
         """Return note path `YYYY/YYYY-MM-DD.md` and create year dir."""
         year_dir = self._vault_root / str(note_dt.year)
         year_dir.mkdir(parents=True, exist_ok=True)
+        # SECURITY: Set restrictive permissions on year directory
+        if self._secure_permissions:
+            year_dir.chmod(0o700)  # rwx------
         return year_dir / f"{note_dt.strftime('%Y-%m-%d')}.md"
 
     def _get_attachments_dir(self, note_dt: datetime) -> Path:
         """Return attachment directory path and ensure it exists."""
         year_dir = self._vault_root / str(note_dt.year)
+        year_dir.mkdir(parents=True, exist_ok=True)
+        # SECURITY: Set restrictive permissions on year directory
+        if self._secure_permissions:
+            year_dir.chmod(0o700)  # rwx------
+        
         attachments_dir = year_dir / "attachments"
         attachments_dir.mkdir(parents=True, exist_ok=True)
+        # SECURITY: Set restrictive permissions on attachments directory
+        if self._secure_permissions:
+            attachments_dir.chmod(0o700)  # rwx------
         return attachments_dir
 
     def _default_frontmatter(self, note_dt: datetime) -> dict[str, Any]:
@@ -124,6 +146,9 @@ class VaultRepository:
         async with aiofiles.open(tmp_path, "w", encoding="utf-8") as handle:
             await handle.write(rendered)
 
+        # SECURITY: Set restrictive permissions on temp file before rename
+        if self._secure_permissions and tmp_path.exists():
+            await asyncio.to_thread(os.chmod, tmp_path, 0o600)  # rw-------
         await asyncio.to_thread(os.replace, tmp_path, note_path)
 
     async def get_note_frontmatter(self, note_dt: datetime) -> dict[str, Any]:
@@ -298,6 +323,9 @@ class VaultRepository:
 
         tg_file = await photo.get_file()
         await tg_file.download_to_drive(output_path)
+        # SECURITY: Set restrictive permissions on media file
+        if self._secure_permissions and output_path.exists():
+            await asyncio.to_thread(os.chmod, output_path, 0o600)  # rw-------
         return f"{note_dt.year}/attachments/{filename}"
 
     async def save_voice(
@@ -319,6 +347,9 @@ class VaultRepository:
 
         tg_file = await voice.get_file()
         await tg_file.download_to_drive(output_path)
+        # SECURITY: Set restrictive permissions on media file
+        if self._secure_permissions and output_path.exists():
+            await asyncio.to_thread(os.chmod, output_path, 0o600)  # rw-------
         return f"{note_dt.year}/attachments/{filename}"
 
     async def save_video(
@@ -340,6 +371,9 @@ class VaultRepository:
 
         tg_file = await video.get_file()
         await tg_file.download_to_drive(output_path)
+        # SECURITY: Set restrictive permissions on media file
+        if self._secure_permissions and output_path.exists():
+            await asyncio.to_thread(os.chmod, output_path, 0o600)  # rw-------
         return f"{note_dt.year}/attachments/{filename}"
 
     async def save_video_note(
@@ -361,4 +395,7 @@ class VaultRepository:
 
         tg_file = await video_note.get_file()
         await tg_file.download_to_drive(output_path)
+        # SECURITY: Set restrictive permissions on media file
+        if self._secure_permissions and output_path.exists():
+            await asyncio.to_thread(os.chmod, output_path, 0o600)  # rw-------
         return f"{note_dt.year}/attachments/{filename}"

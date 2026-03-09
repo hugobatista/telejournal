@@ -24,6 +24,11 @@ LOG_LEVEL=INFO
 TELEGRAM_ALLOWED_USER_IDS=123456,987654
 ```
 
+### Optional Environment Variables
+
+- `MESSAGE_TIMESTAMP_WINDOW_SECONDS` (default: `60`) - Messages within this window share the same timestamp
+- `SECURE_FILE_PERMISSIONS` (default: `true`) - Set restrictive permissions (0o700/0o600) on vault directories and files for security. Set to `false` only if you need broader file access.
+
 ## Run
 
 ```bash

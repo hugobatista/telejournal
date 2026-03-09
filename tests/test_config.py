@@ -101,3 +101,39 @@ def test_load_settings_rejects_negative_window_seconds(
 
     with pytest.raises(ValueError, match="MESSAGE_TIMESTAMP_WINDOW_SECONDS"):
         load_settings()
+
+
+def test_load_settings_secure_permissions_default_true(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Secure file permissions should default to True when not specified."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
+    monkeypatch.delenv("SECURE_FILE_PERMISSIONS", raising=False)
+
+    settings = load_settings()
+    assert settings.secure_file_permissions is True
+
+
+def test_load_settings_secure_permissions_explicit_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Secure file permissions should parse various true/false values."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
+
+    # Test true values
+    for true_value in ["true", "TRUE", "True", "1", "yes", "YES", "on", "ON"]:
+        monkeypatch.setenv("SECURE_FILE_PERMISSIONS", true_value)
+        settings = load_settings()
+        assert settings.secure_file_permissions is True, f"Failed for: {true_value}"
+
+    # Test false values
+    for false_value in ["false", "FALSE", "False", "0", "no", "NO", "off", "OFF"]:
+        monkeypatch.setenv("SECURE_FILE_PERMISSIONS", false_value)
+        settings = load_settings()
+        assert settings.secure_file_permissions is False, f"Failed for: {false_value}"
