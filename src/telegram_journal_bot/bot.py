@@ -26,6 +26,8 @@ from telegram_journal_bot.formatting import (
     format_album_entry,
     format_entry_block,
     format_location_entry,
+    format_mood_change_text,
+    format_mood_saved_text,
     format_photo_entry,
     format_text_entry,
     render_message_markdown,
@@ -865,13 +867,7 @@ class JournalBot:
             await self._repository.update_frontmatter(note_dt, {"mood": mood})
 
             if previous != mood:
-                if isinstance(previous, int) and previous in MOOD_LABELS:
-                    change_text = (
-                        f"Mood changed {MOOD_LABELS[previous]} ({previous}/5)"
-                        f" -> {MOOD_LABELS[mood]} ({mood}/5)"
-                    )
-                else:
-                    change_text = f"Mood set to {MOOD_LABELS[mood]} ({mood}/5)"
+                change_text = format_mood_change_text(previous, mood)
 
                 include_timestamp = self._should_include_timestamp(
                     chat_data,
@@ -891,9 +887,7 @@ class JournalBot:
 
             chat_data[LAST_PROMPT_AT_KEY] = now
             chat_data[LAST_PROMPT_NOTE_KEY] = note_dt.strftime("%Y-%m-%d")
-            await query.edit_message_text(
-                f"Mood saved: {MOOD_LABELS.get(mood, str(mood))} ({mood}/5)"
-            )
+            await query.edit_message_text(format_mood_saved_text(mood))
             return
 
         if query.data.startswith(DELETE_CALLBACK_PREFIX):

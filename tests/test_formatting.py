@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from telegram_journal_bot.formatting import (
+    MOOD_LABELS,
+    format_mood_change_text,
+    format_mood_saved_text,
     format_album_entry,
     format_entry_block,
     format_location_entry,
@@ -78,3 +81,12 @@ def test_format_entry_block() -> None:
     )
     assert format_entry_block(dt, " hello ", include_timestamp=False) == "hello"
     assert format_entry_block(dt, "   ", include_timestamp=True) == "%% 18:34:00 %%"
+
+
+def test_format_mood_messages() -> None:
+    """Mood text should render consistently for set/change/saved states."""
+    assert format_mood_change_text(None, 4) == f"Mood set to {MOOD_LABELS[4]} (4/5)"
+    assert format_mood_change_text(2, 5) == (
+        f"Mood changed {MOOD_LABELS[2]} (2/5) -> {MOOD_LABELS[5]} (5/5)"
+    )
+    assert format_mood_saved_text(3) == f"Mood saved: {MOOD_LABELS[3]} (3/5)"

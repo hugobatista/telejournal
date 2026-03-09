@@ -23,6 +23,21 @@ def extract_mood_value(raw_mood: Any) -> int | None:
     return None
 
 
+def format_mood_change_text(previous_mood: int | None, current_mood: int) -> str:
+    """Format note text describing a mood set/change event."""
+    if previous_mood is not None and previous_mood in MOOD_LABELS:
+        return (
+            f"Mood changed {MOOD_LABELS[previous_mood]} ({previous_mood}/5)"
+            f" -> {MOOD_LABELS[current_mood]} ({current_mood}/5)"
+        )
+    return f"Mood set to {MOOD_LABELS[current_mood]} ({current_mood}/5)"
+
+
+def format_mood_saved_text(mood: int) -> str:
+    """Format callback confirmation text after mood is persisted."""
+    return f"Mood saved: {MOOD_LABELS[mood]} ({mood}/5)"
+
+
 def format_timestamp_marker(dt: datetime) -> str:
     """Format a timestamp marker as a markdown comment line."""
     return f"%% {dt.strftime('%H:%M:%S')} %%"
