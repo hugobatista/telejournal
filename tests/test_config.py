@@ -9,10 +9,12 @@ import pytest
 from telegram_journal_bot.config import _parse_allowed_user_ids, load_settings
 
 
-def test_parse_allowed_user_ids_none() -> None:
-    """Empty values should disable whitelist enforcement."""
-    assert _parse_allowed_user_ids(None) is None
-    assert _parse_allowed_user_ids("") is None
+def test_parse_allowed_user_ids_empty() -> None:
+    """Empty values should raise an error."""
+    with pytest.raises(ValueError, match="at least one valid user ID"):
+        _parse_allowed_user_ids("")
+    with pytest.raises(ValueError, match="at least one valid user ID"):
+        _parse_allowed_user_ids(" , , ")
 
 
 def test_parse_allowed_user_ids_values() -> None:
@@ -38,6 +40,18 @@ def test_load_settings_requires_vault_root(
     monkeypatch.delenv("VAULT_ROOT", raising=False)
 
     with pytest.raises(ValueError, match="VAULT_ROOT"):
+        load_settings()
+
+
+def test_load_settings_requires_allowed_user_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing allowed user IDs should fail fast at startup."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", "/tmp/vault")
+    monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
+
+    with pytest.raises(ValueError, match="TELEGRAM_ALLOWED_USER_IDS"):
         load_settings()
 
 
@@ -68,6 +82,7 @@ def test_load_settings_defaults_window_seconds(
     """Window setting should default to 60 seconds when absent."""
     monkeypatch.setenv("TELEGRAM_TOKEN", "token")
     monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
     monkeypatch.delenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", raising=False)
 
     settings = load_settings()
@@ -81,6 +96,7 @@ def test_load_settings_rejects_negative_window_seconds(
     """Negative window values should fail fast."""
     monkeypatch.setenv("TELEGRAM_TOKEN", "token")
     monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "-1")
 
     with pytest.raises(ValueError, match="MESSAGE_TIMESTAMP_WINDOW_SECONDS"):

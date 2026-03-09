@@ -20,12 +20,12 @@ from telegram_journal_bot.bot import (
     MOOD_CALLBACK_PREFIX,
     TAG_CALLBACK_PREFIX,
     JournalBot,
-    _extract_mood_value,
     _mood_keyboard,
     _tags_keyboard,
     _truncate_message,
 )
 from telegram_journal_bot.config import Settings
+from telegram_journal_bot.formatting import extract_mood_value
 
 
 class _FakeJobQueue:
@@ -60,7 +60,7 @@ class _FakeJobQueue:
 @pytest.fixture
 def journal_bot(tmp_path: Path) -> JournalBot:
     """Create bot with fake repository methods for handler testing."""
-    bot = JournalBot(Settings("token", tmp_path))
+    bot = JournalBot(Settings("token", tmp_path, {1}))
     bot._repository = SimpleNamespace(  # type: ignore[assignment]
         append_entry=AsyncMock(),
         delete_last_entry=AsyncMock(return_value="%% 18:34:42 %%\nhello"),
@@ -366,13 +366,13 @@ async def test_show_command_specific_day(journal_bot: JournalBot) -> None:
     assert "mood: 3" in update.effective_message.reply_text.await_args.args[0]
 
 
-def test_extract_mood_value_legacy_shapes() -> None:
-    """Mood extractor should support int, dict, list and invalid values."""
-    assert _extract_mood_value(None) is None
-    assert _extract_mood_value(3) == 3
-    assert _extract_mood_value({"value": 4}) == 4
-    assert _extract_mood_value([{"value": 2}, {"value": 5}]) == 5
-    assert _extract_mood_value([{"value": "x"}]) is None
+def test_extract_mood_value_simple() -> None:
+    """Mood extractor should handle int and invalid values."""
+    assert extract_mood_value(None) is None
+    assert extract_mood_value(3) == 3
+    assert extract_mood_value(99) is None
+    assert extract_mood_value({"value": 4}) is None
+    assert extract_mood_value([{"value": 2}]) is None
 
 
 def test_truncate_message_branch() -> None:
@@ -702,6 +702,7 @@ async def test_should_include_timestamp_zero_window(journal_bot: JournalBot) -> 
     journal_bot._settings = Settings(
         telegram_token="token",
         vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
         message_timestamp_window_seconds=0,
     )
     chat_data: dict[str, Any] = {}

@@ -51,7 +51,7 @@ class _FakeJournalBot:
 
 def test_main_registers_and_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Entrypoint should build app, register handlers/jobs, then start polling."""
-    settings = Settings("token", tmp_path)
+    settings = Settings("token", tmp_path, {1})
     app = _FakeApplication(has_job_queue=True)
     builder = _FakeBuilder(app)
 
@@ -75,7 +75,7 @@ def test_main_raises_without_job_queue(
     tmp_path: Path,
 ) -> None:
     """Entrypoint should fail if PTB app has no job queue available."""
-    settings = Settings("token", tmp_path)
+    settings = Settings("token", tmp_path, {1})
     app = _FakeApplication(has_job_queue=False)
     builder = _FakeBuilder(app)
 
