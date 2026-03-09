@@ -7,8 +7,10 @@ from types import SimpleNamespace
 
 from telegram_journal_bot.formatting import (
     MOOD_LABELS,
+    extract_reply_quote,
     format_mood_change_text,
     format_mood_saved_text,
+    format_with_quote,
     format_album_entry,
     format_entry_block,
     format_location_entry,
@@ -90,3 +92,233 @@ def test_format_mood_messages() -> None:
         f"Mood changed {MOOD_LABELS[2]} (2/5) -> {MOOD_LABELS[5]} (5/5)"
     )
     assert format_mood_saved_text(3) == f"Mood saved: {MOOD_LABELS[3]} (3/5)"
+
+
+def test_extract_reply_quote_self_reply() -> None:
+    """Self-reply should extract quoted text from original message."""
+    replied_msg = SimpleNamespace(
+        text="original message",
+        text_markdown_urled="original message",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "original message"  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_no_reply() -> None:
+    """Message without reply should return None."""
+    message = SimpleNamespace(
+        text="message",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=None,
+    )
+    assert extract_reply_quote(message) is None  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_different_user() -> None:
+    """Reply to different user should return None."""
+    replied_msg = SimpleNamespace(
+        text="other user message",
+        from_user=SimpleNamespace(id=99),
+        caption=None,
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) is None  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_media_with_caption() -> None:
+    """Reply to photo with caption should extract caption."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption="photo caption",
+        caption_markdown_urled="photo caption",
+        from_user=SimpleNamespace(id=1),
+        photo=[object()],
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "photo caption"  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_media_without_caption() -> None:
+    """Reply to photo without caption should use placeholder."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=[object()],
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "[Photo]"  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_voice_placeholder() -> None:
+    """Reply to voice should use [Voice message] placeholder."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=object(),
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "[Voice message]"  # type: ignore[arg-type]
+
+
+def test_format_with_quote_single_line() -> None:
+    """Quote formatting should prefix lines with > and separate with blank line."""
+    result = format_with_quote("original", "new content")
+    assert result == "> original\n\nnew content"
+
+
+def test_format_with_quote_multiline() -> None:
+    """Multi-line quotes should prefix each line with >."""
+    result = format_with_quote("line 1\nline 2\nline 3", "reply")
+    assert result == "> line 1\n> line 2\n> line 3\n\nreply"
+
+
+def test_format_with_quote_empty_lines() -> None:
+    """Empty lines in quotes should become standalone >."""
+    result = format_with_quote("line 1\n\nline 3", "content")
+    assert result == "> line 1\n>\n> line 3\n\ncontent"
+
+
+def test_extract_reply_quote_video_placeholder() -> None:
+    """Reply to video should use [Video] placeholder."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=object(),
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "[Video]"  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_video_note_placeholder() -> None:
+    """Reply to video note should use [Video note] placeholder."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=object(),
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "[Video note]"  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_location_placeholder() -> None:
+    """Reply to location should use [Location] placeholder."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=object(),
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "[Location]"  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_no_content() -> None:
+    """Reply to message with no extractable content should return None."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) is None  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_missing_from_user() -> None:
+    """Reply without from_user should return None."""
+    replied_msg = SimpleNamespace(
+        text="message",
+        from_user=None,  # Missing from_user
+        caption=None,
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="reply",
+        from_user=SimpleNamespace(id=1),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) is None  # type: ignore[arg-type]

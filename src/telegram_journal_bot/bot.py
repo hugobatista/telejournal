@@ -23,6 +23,7 @@ from telegram_journal_bot.config import Settings
 from telegram_journal_bot.formatting import (
     MOOD_LABELS,
     extract_mood_value,
+    extract_reply_quote,
     format_album_entry,
     format_entry_block,
     format_location_entry,
@@ -30,6 +31,7 @@ from telegram_journal_bot.formatting import (
     format_mood_saved_text,
     format_photo_entry,
     format_text_entry,
+    format_with_quote,
     render_message_markdown,
 )
 from telegram_journal_bot.logic import (
@@ -496,6 +498,12 @@ class JournalBot:
         if media_group_id and context.job_queue is not None:
             chat_data = self._chat_data(context)
             albums = chat_data.setdefault(ALBUMS_KEY, {})
+            
+            # Extract quote only once per album (from first message)
+            quote = None
+            if media_group_id not in albums:
+                quote = extract_reply_quote(message)
+            
             album_state = albums.setdefault(
                 media_group_id,
                 {
@@ -503,6 +511,7 @@ class JournalBot:
                     "caption": "",
                     "images": [],
                     "include_timestamp": include_timestamp,
+                    "quote": quote,
                 },
             )
 
@@ -527,6 +536,11 @@ class JournalBot:
         heading = (
             format_photo_entry(caption, attachment_rel, "Photo")
         )
+        
+        quote = extract_reply_quote(message)
+        if quote:
+            heading = format_with_quote(quote, heading)
+        
         entry = format_entry_block(note_dt, heading, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -564,12 +578,17 @@ class JournalBot:
         note_dt = album_state.get("note_dt")
         images = album_state.get("images") or []
         caption = album_state.get("caption") or ""
+        quote = album_state.get("quote")
         if not isinstance(note_dt, datetime) or not images:
             return
 
         heading = (
             format_album_entry(caption, images, "Photo album")
         )
+        
+        if quote:
+            heading = format_with_quote(quote, heading)
+        
         include_timestamp = bool(album_state.get("include_timestamp", True))
         entry = format_entry_block(note_dt, heading, include_timestamp)
         try:
@@ -588,6 +607,7 @@ class JournalBot:
 
     async def _handle_location(
         self,
+        update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
         latitude: float,
@@ -596,6 +616,13 @@ class JournalBot:
     ) -> None:
         """Persist a location message as a markdown journal line."""
         body = format_location_entry(latitude, longitude)
+        
+        message = update.effective_message
+        if message:
+            quote = extract_reply_quote(message)
+            if quote:
+                body = format_with_quote(quote, body)
+        
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         location_data = {
@@ -617,9 +644,12 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
         include_timestamp: bool,
+        quote: str | None = None,
     ) -> None:
         """Persist a text message as a journal line."""
         body = format_text_entry(message_text)
+        if quote:
+            body = format_with_quote(quote, body)
         entry = format_entry_block(note_dt, body, include_timestamp)
         chat_data = self._chat_data(context)
         await self._record_entry(
@@ -645,6 +675,11 @@ class JournalBot:
         attachment_rel = await self._repository.save_voice(message.voice, note_dt, ts)
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Voice recording")
+        
+        quote = extract_reply_quote(message)
+        if quote:
+            body = format_with_quote(quote, body)
+        
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -672,6 +707,11 @@ class JournalBot:
         attachment_rel = await self._repository.save_video(message.video, note_dt, ts)
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Video message")
+        
+        quote = extract_reply_quote(message)
+        if quote:
+            body = format_with_quote(quote, body)
+        
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -699,6 +739,11 @@ class JournalBot:
         attachment_rel = await self._repository.save_video_note(message.video_note, note_dt, ts)
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Video note")
+        
+        quote = extract_reply_quote(message)
+        if quote:
+            body = format_with_quote(quote, body)
+        
         entry = format_entry_block(note_dt, body, include_timestamp)
 
         chat_data = self._chat_data(context)
@@ -800,6 +845,7 @@ class JournalBot:
                 )
             elif message.location:
                 await self._handle_location(
+                    update,
                     context,
                     note_dt,
                     message.location.latitude,
@@ -809,7 +855,8 @@ class JournalBot:
                 wrote_entry = True
             elif message.text:
                 text = render_message_markdown(message)
-                await self._handle_text(text, context, note_dt, include_timestamp)
+                quote = extract_reply_quote(message)
+                await self._handle_text(text, context, note_dt, include_timestamp, quote)
                 wrote_entry = True
         except OSError:
             LOGGER.exception("Vault write failed")

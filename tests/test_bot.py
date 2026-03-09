@@ -115,6 +115,7 @@ def _private_update(
     media_group_id: str | None = None,
     callback_data: str | None = None,
     message_id: int = 1,
+    reply_to_message: object | None = None,
 ) -> SimpleNamespace:
     """Build a minimal private Update-like object."""
     message = SimpleNamespace(
@@ -130,6 +131,8 @@ def _private_update(
         media_group_id=media_group_id,
         message_id=message_id,
         reply_text=AsyncMock(),
+        reply_to_message=reply_to_message,
+        from_user=SimpleNamespace(id=user_id),
     )
     callback_query = None
     if callback_data is not None:
@@ -879,3 +882,267 @@ async def test_mood_timer_non_dict_chat_data_is_skipped(
     context.application.chat_data[1] = "invalid"
     await journal_bot.check_mood_timers(context)
     assert context.bot.send_message.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_text_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Text message replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="first message",
+        text_markdown_urled="first message",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(text="this is a great message", reply_to_message=replied_msg)
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> first message" in entry_text
+    assert "this is a great message" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_photo_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Photo message replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="original text",
+        text_markdown_urled="original text",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(
+        photo=[object()],
+        text=None,
+        caption="photo caption",
+        reply_to_message=replied_msg,
+    )
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> original text" in entry_text
+    assert "photo caption" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_voice_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Voice message replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="original",
+        text_markdown_urled="original",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(voice=object(), text=None, reply_to_message=replied_msg)
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> original" in entry_text
+    assert "Voice recording" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_video_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Video message replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="video reply",
+        text_markdown_urled="video reply",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(video=object(), text=None, reply_to_message=replied_msg)
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> video reply" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_location_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Location message replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="meet here",
+        text_markdown_urled="meet here",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(
+        location=SimpleNamespace(latitude=40.0, longitude=-74.0),
+        text=None,
+        reply_to_message=replied_msg,
+    )
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> meet here" in entry_text
+    assert "Location:" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_reply_to_different_user_not_quoted(journal_bot: JournalBot) -> None:
+    """Reply to message from different user should not be quoted."""
+    replied_msg = SimpleNamespace(
+        text="other user message",
+        text_markdown_urled="other user message",
+        caption=None,
+        from_user=SimpleNamespace(id=99),  # Different user
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(text="my reply", reply_to_message=replied_msg)
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> other user message" not in entry_text
+    assert "my reply" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_reply_to_media_without_text(journal_bot: JournalBot) -> None:
+    """Reply to media message without text should show placeholder."""
+    replied_msg = SimpleNamespace(
+        text=None,
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=[object()],  # Photo without caption
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(text="nice photo", reply_to_message=replied_msg)
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> [Photo]" in entry_text
+    assert "nice photo" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_video_note_message_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Video note replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="check this",
+        text_markdown_urled="check this",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(video_note=object(), text=None, reply_to_message=replied_msg)
+    context = _context()
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> check this" in entry_text
+    assert "Video note" in entry_text
+
+
+@pytest.mark.asyncio
+async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
+    """Photo album replying to self should include quoted original message."""
+    replied_msg = SimpleNamespace(
+        text="original album message",
+        text_markdown_urled="original album message",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    
+    # First photo in album with reply
+    update1 = _private_update(
+        photo=[object()],
+        text=None,
+        caption="album caption",
+        media_group_id="album123",
+        reply_to_message=replied_msg,
+    )
+    context = _context()
+    await journal_bot.handle_journal_entry(update1, context)
+    
+    # Second photo in same album
+    update2 = _private_update(
+        photo=[object()],
+        text=None,
+        caption=None,
+        media_group_id="album123",
+        reply_to_message=None,
+    )
+    await journal_bot.handle_journal_entry(update2, context)
+    
+    # Setup context for flush with shared chat_data
+    context.job = SimpleNamespace(data={"chat_id": 1, "media_group_id": "album123"})
+    context.application.chat_data[1] = context.chat_data
+    
+    await journal_bot.flush_album_entry(context)
+    
+    assert journal_bot._repository.append_entry.await_count == 1  # type: ignore
+    call_args = journal_bot._repository.append_entry.await_args  # type: ignore
+    entry_text = call_args.args[1]
+    assert "> original album message" in entry_text
+    assert "album caption" in entry_text

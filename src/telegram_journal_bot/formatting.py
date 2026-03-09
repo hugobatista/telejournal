@@ -56,6 +56,44 @@ def render_message_markdown(message: Message) -> str:
     return ""
 
 
+def extract_reply_quote(message: Message) -> str | None:
+    """Extract quoted text from a self-reply message, or None if not applicable."""
+    reply_to = message.reply_to_message
+    if not reply_to:
+        return None
+
+    # Only quote self-replies (same user)
+    if not message.from_user or not reply_to.from_user:
+        return None
+    if message.from_user.id != reply_to.from_user.id:
+        return None
+
+    # Extract text or caption from the replied message
+    quoted_text = render_message_markdown(reply_to)
+    if not quoted_text:
+        # Handle media without caption
+        if reply_to.photo:
+            return "[Photo]"
+        if reply_to.voice:
+            return "[Voice message]"
+        if reply_to.video:
+            return "[Video]"
+        if reply_to.video_note:
+            return "[Video note]"
+        if reply_to.location:
+            return "[Location]"
+        return None
+
+    return quoted_text
+
+
+def format_with_quote(quote: str, content: str) -> str:
+    """Format content with a markdown quote block prefix."""
+    quote_lines = [f"> {line}" if line else ">" for line in quote.split("\n")]
+    quote_block = "\n".join(quote_lines)
+    return f"{quote_block}\n\n{content}"
+
+
 def format_text_entry(text: str) -> str:
     """Format a plain text journal line without timestamp decoration."""
     return text.strip()
