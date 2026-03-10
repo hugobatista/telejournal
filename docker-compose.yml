@@ -1,0 +1,23 @@
+services:
+  telejournal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: telejournal:latest
+    container_name: telejournal
+    
+    # Load authentication tokens from .env file
+    env_file:
+      - .env.docker
+
+
+    volumes:
+      - ./obsidian-journal:/data:Z
+    
+    # Network (for future services)
+    networks:
+      - telejournal-network
+
+networks:
+  telejournal-network:
+    driver: bridge

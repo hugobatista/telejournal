@@ -9,3 +9,5 @@ build/
 htmlcov/
 py.typed
 .mypy_cache/
+.env.docker
+obsidian-journal/
