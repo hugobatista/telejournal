@@ -617,8 +617,8 @@ wheels = [
 ]
 
 [[package]]
-name = "telegram-journal-bot"
-version = "0.1.0"
+name = "telejournal"
+version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

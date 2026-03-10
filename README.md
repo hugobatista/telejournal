@@ -153,3 +153,48 @@ This will create:
 
 See the script for more details and options.
 
+## Running as a Systemd Service
+
+To run the Telegram Journal Bot as a background service on Linux, you can use systemd. This ensures the bot starts on boot and restarts automatically if it fails.
+
+### Example systemd Service File
+
+Create a file at `/etc/systemd/system/telejournal.service` with the following content (adjust paths and user as needed):
+
+```ini
+[Unit]
+Description=Telegram Journal Bot
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser/code/projects/telejournal
+EnvironmentFile=/home/youruser/code/projects/telejournal/.env
+ExecStart=/home/youruser/code/projects/telejournal/.venv/bin/uv run telegram-bot
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+- Set `User` and `WorkingDirectory` to your user and project path
+- Set `EnvironmentFile` to your `.env` file location
+- Adjust `ExecStart` to use your Python environment and entrypoint
+
+### Enable and Start the Service
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable telejournal.service
+sudo systemctl start telejournal.service
+```
+
+Check logs with:
+
+```bash
+journalctl -u telejournal.service -f
+```
+
+This will keep the bot running in the background and restart it automatically on failure or reboot.
+
