@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from telegram.constants import ChatType
 
-from telegram_journal_bot.bot import (
+from telejournal.bot import (
     ACTIVE_CHATS_KEY,
     ALBUMS_KEY,
     DELETE_CALLBACK_PREFIX,
@@ -24,8 +24,8 @@ from telegram_journal_bot.bot import (
     _tags_keyboard,
     _truncate_message,
 )
-from telegram_journal_bot.config import Settings
-from telegram_journal_bot.formatting import extract_mood_value
+from telejournal.config import Settings
+from telejournal.formatting import extract_mood_value
 
 
 class _FakeJobQueue:
@@ -544,7 +544,7 @@ async def test_handle_error_and_auth_rejections(journal_bot: JournalBot) -> None
         def __init__(self) -> None:
             self.effective_message = SimpleNamespace(reply_text=AsyncMock())
 
-    from telegram_journal_bot import bot as bot_module
+    from telejournal import bot as bot_module
 
     original_update = bot_module.Update
     bot_module.Update = _UpdateStub  # type: ignore
@@ -1191,7 +1191,7 @@ async def test_album_with_self_reply_quote(journal_bot: JournalBot) -> None:
 @pytest.mark.asyncio
 async def test_date_bounds_validation(journal_bot: JournalBot) -> None:
     """SECURITY: _parse_iso_date should reject dates outside allowed range."""
-    from telegram_journal_bot.bot import _parse_iso_date
+    from telejournal.bot import _parse_iso_date
 
     # Test date too far in past (> 2 years)
     with pytest.raises(ValueError, match="outside allowed range"):

@@ -19,8 +19,8 @@ from telegram.ext import (
     filters,
 )
 
-from telegram_journal_bot.config import Settings
-from telegram_journal_bot.formatting import (
+from telejournal.config import Settings
+from telejournal.formatting import (
     MOOD_LABELS,
     extract_mood_value,
     extract_reply_quote,
@@ -34,12 +34,12 @@ from telegram_journal_bot.formatting import (
     format_with_quote,
     render_message_markdown,
 )
-from telegram_journal_bot.logic import (
+from telejournal.logic import (
     effective_note_datetime,
     parse_setdate_args,
     should_prompt_for_mood,
 )
-from telegram_journal_bot.storage import VaultRepository
+from telejournal.storage import VaultRepository
 
 __all__ = ["JournalBot"]
 

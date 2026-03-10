@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from telegram_journal_bot.config import Settings
-from telegram_journal_bot import main as main_module
+from telejournal.config import Settings
+from telejournal import main as main_module
 
 
 class _FakeBuilder:

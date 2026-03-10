@@ -44,4 +44,4 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run pytest
-        run: uv run pytest --cov=src/telegram_journal_bot
+        run: uv run pytest --cov=src/telejournal

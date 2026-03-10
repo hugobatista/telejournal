@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application
 
-from telegram_journal_bot.bot import JournalBot
-from telegram_journal_bot.config import load_settings
+from telejournal.bot import JournalBot
+from telejournal.config import load_settings
 
 __all__ = ["main", "run"]
 

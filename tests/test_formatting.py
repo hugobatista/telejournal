@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from telegram_journal_bot.formatting import (
+from telejournal.formatting import (
     MOOD_LABELS,
     extract_reply_quote,
     format_mood_change_text,

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from telegram_journal_bot.config import _parse_allowed_user_ids, load_settings
+from telejournal.config import _parse_allowed_user_ids, load_settings
 
 
 def test_parse_allowed_user_ids_empty() -> None:

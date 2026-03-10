@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from telegram_journal_bot.logic import (
+from telejournal.logic import (
     effective_note_datetime,
     parse_setdate_args,
     should_prompt_for_mood,

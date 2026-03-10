@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from telegram_journal_bot.storage import VaultRepository
+from telejournal.storage import VaultRepository
 
 
 @pytest.mark.asyncio
