@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -31,6 +31,28 @@ async def test_append_entry_creates_note_with_defaults(tmp_path: Path) -> None:
     assert "tags:" in content
     assert "- journal" in content
     assert "%% 18:34:42 %%\nFirst entry #journal" in content
+
+
+@pytest.mark.asyncio
+async def test_append_entry_creates_note_with_today_defaults(tmp_path: Path) -> None:
+    """Appending entry for today should set 'created' to current datetime."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    # Mock datetime.now to return a datetime on the same date as note_dt
+    with patch("telejournal.storage.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 7, 12, 0, 0, tzinfo=UTC)
+        mock_dt.combine = datetime.combine
+        mock_dt.min.time = datetime.min.time
+        mock_dt.UTC = UTC
+
+        note_path = await repo.append_entry(
+            note_dt,
+            "%% 18:34:42 %%\nToday's entry #journal",
+        )
+        content = note_path.read_text(encoding="utf-8")
+
+        # Should have created set to the mocked now
+        assert "created: '2026-03-07T12:00:00Z'" in content
 
 
 @pytest.mark.asyncio
