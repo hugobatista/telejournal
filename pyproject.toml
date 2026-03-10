@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-telegram-bot = "telegram_journal_bot.main:run"
+telejournal = "telegram_journal_bot.main:run"
 
 [build-system]
 requires = ["hatchling"]

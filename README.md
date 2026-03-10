@@ -1,6 +1,11 @@
+[![PyPI - Version](https://img.shields.io/pypi/v/telejournal.svg)](https://pypi.org/project/telejournal)
+[![GitHub Tag](https://img.shields.io/github/v/tag/hugobatista/telejournal?logo=github&label=latest)](https://go.hugobatista.com/gh/telejournal/releases)
+[![GHCR Tag](https://img.shields.io/github/v/tag/hugobatista/telejournal?logo=docker&logoColor=white&label=GHCR)](https://go.hugobatista.com/gh/telejournal/packages)
+[![Test](https://go.hugobatista.com/gh/telejournal/actions/workflows/test.yml/badge.svg)](https://go.hugobatista.com/gh/telejournal/actions/workflows/test.yml)
+[![Lint](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml/badge.svg)](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml)
 # Telegram Journal Bot
 
-Telegram bot that journals every private message into Obsidian daily notes.
+A Telegram bot that journals every private message into your Obsidian daily notes.
 
 ## Features
 
@@ -11,7 +16,6 @@ Telegram bot that journals every private message into Obsidian daily notes.
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
 - Tags and mood management with inline keyboard callbacks
-- Mood reminder checks every 5 minutes
 
 ## Environment
 

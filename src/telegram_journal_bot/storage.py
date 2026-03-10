@@ -79,17 +79,23 @@ class VaultRepository:
         return attachments_dir
 
     def _default_frontmatter(self, note_dt: datetime) -> dict[str, Any]:
-        """Create default YAML frontmatter for a date."""
-        start_of_day = datetime.combine(
-            note_dt.date(),
-            datetime.min.time(),
-        ).replace(tzinfo=UTC)
+        """
+        Create default YAML frontmatter for a date.
+
+        - If note_dt is for today, set 'created' to current UTC datetime.
+        - Else, set 'created' to note_dt's date at 00:00:00 UTC.
+        """
+        today = datetime.now(UTC).date()
+        if note_dt.date() == today:
+            created_dt = datetime.now(UTC)
+        else:
+            created_dt = datetime.combine(note_dt.date(), datetime.min.time(), tzinfo=UTC)
 
         return {
             "mood": None,
             "location": None,
             "tags": ["journal"],
-            "created": start_of_day.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "created": created_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
     def _split_frontmatter(self, content: str) -> tuple[dict[str, Any], str]:
