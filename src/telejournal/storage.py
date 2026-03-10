@@ -89,7 +89,9 @@ class VaultRepository:
         if note_dt.date() == today:
             created_dt = datetime.now(UTC)
         else:
-            created_dt = datetime.combine(note_dt.date(), datetime.min.time(), tzinfo=UTC)
+            created_dt = datetime.combine(
+                note_dt.date(), datetime.min.time(), tzinfo=UTC
+            )
 
         return {
             "mood": None,
