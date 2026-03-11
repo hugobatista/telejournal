@@ -19,9 +19,7 @@ from telejournal.output_handler import OutputHandler
 
 __all__ = ["app", "main", "run"]
 
-app = typer.Typer(
-    help="Telegram bot that journals private messages into your vault."
-)
+app = typer.Typer(help="Telegram bot that journals private messages into your vault.")
 
 
 def _resolve_run_config_path(config_path: Path | None) -> Path | None:

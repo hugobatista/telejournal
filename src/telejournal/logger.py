@@ -50,7 +50,9 @@ def setup_default_logging() -> logging.Logger:
     return logger
 
 
-def setup_logging(log_level: str | None = None, verbose: bool = False) -> logging.Logger:
+def setup_logging(
+    log_level: str | None = None, verbose: bool = False
+) -> logging.Logger:
     """Configure final logging after all settings have been resolved."""
     logger = logging.getLogger(_LOGGER_NAME)
     level = getattr(logging, (log_level or "INFO").upper(), logging.INFO)

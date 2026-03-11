@@ -73,7 +73,7 @@ def _resolve_config_path(config_path: Path | None) -> Path | None:
 
 def _merge_configs(*sources: dict[str, Any]) -> dict[str, Any]:
     """Merge config dictionaries from lowest to highest priority.
-    
+
     Iterates through sources left-to-right, skipping None values.
     Later sources override earlier ones.
     """

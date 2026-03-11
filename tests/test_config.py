@@ -151,7 +151,7 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
             [
                 "telegram_token: yaml-token",
                 f"vault_root: {tmp_path / 'vault'}",
-                "allowed_user_ids: \"10,20\"",
+                'allowed_user_ids: "10,20"',
                 "log_level: warning",
                 "message_timestamp_window_seconds: 30",
                 "secure_file_permissions: false",
@@ -186,7 +186,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
             [
                 "telegram_token: yaml-token",
                 f"vault_root: {tmp_path / 'yaml-vault'}",
-                "allowed_user_ids: \"3,4\"",
+                'allowed_user_ids: "3,4"',
                 "log_level: warning",
                 "message_timestamp_window_seconds: 20",
             ]
@@ -241,7 +241,7 @@ def test_load_settings_yaml_env_expansion(
             [
                 "telegram_token: ${YAML_TOKEN}",
                 f"vault_root: {tmp_path / 'vault'}",
-                "allowed_user_ids: \"11,12\"",
+                'allowed_user_ids: "11,12"',
             ]
         ),
         encoding="utf-8",

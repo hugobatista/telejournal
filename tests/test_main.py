@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 from telejournal.config import Settings
 from telejournal import main as main_module
 
-
 RUNNER = CliRunner()
 
 
