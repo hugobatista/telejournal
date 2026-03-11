@@ -39,6 +39,9 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["src/telejournal"]
+omit = [
+    "*/__init__.py",
+]
 
 [tool.coverage.report]
 show_missing = true
