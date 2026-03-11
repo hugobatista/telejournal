@@ -37,14 +37,14 @@ TELEGRAM_ALLOWED_USER_IDS=123456,987654
 
 ```bash
 uv sync --extra dev
-uv run telegram-bot
+uv run telejournal
 ```
 
 Note: If you use linux secret service, namely `secret-tool`, you can skip the `.env` file step and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run) to automatically load secrets from your vault.
 
 ```bash
 # Run with secrets from vault
-secret-tool-run uv run telegram-bot
+secret-tool-run uv run telejournal
 ```
 
 ## Test
