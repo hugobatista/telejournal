@@ -23,6 +23,6 @@ VOLUME /data
 USER app
 
 HEALTHCHECK --interval=300s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import telejournal" || exit 1
+    CMD telejournal version || exit 1
 
 ENTRYPOINT ["telejournal"]

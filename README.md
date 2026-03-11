@@ -33,18 +33,111 @@ TELEGRAM_ALLOWED_USER_IDS=123456,987654
 - `MESSAGE_TIMESTAMP_WINDOW_SECONDS` (default: `60`) - Messages within this window share the same timestamp
 - `SECURE_FILE_PERMISSIONS` (default: `true`) - Set restrictive permissions (0o700/0o600) on vault directories and files for security. Set to `false` only if you need broader file access.
 
+## Configuration
+
+The bot supports multiple configuration sources with a clear priority order:
+
+### Configuration Priority (highest to lowest)
+
+1. **CLI Arguments** - Command-line options override all other sources
+2. **YAML File** - Configuration file specified via `config` argument
+3. **Environment Variables** - Settings from `.env` file
+4. **Defaults** - Built-in defaults for optional settings
+
+Later sources override earlier ones. For example, if you specify `--telegram-token` on the command line, it will override the `TELEGRAM_TOKEN` environment variable.
+
+### YAML Configuration
+
+You can provide a `config.yaml` file for more organized configuration management. The bot automatically looks for `./config.yaml` if no config path is specified.
+
+**Example `config.yaml`:**
+
+```yaml
+telegram_token: "${TELEGRAM_TOKEN}"  # Supports environment variable expansion
+vault_root: /path/to/obsidian/vault
+allowed_user_ids:
+  - 123456
+  - 987654
+log_level: INFO
+message_timestamp_window_seconds: 60
+secure_file_permissions: true
+```
+
+**Configuration Keys:**
+
+- `telegram_token` (required) - Your Telegram bot token
+- `vault_root` (required) - Absolute path to your Obsidian vault
+- `allowed_user_ids` (required) - List of Telegram user IDs that can use the bot
+- `log_level` (optional, default: `INFO`) - Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- `message_timestamp_window_seconds` (optional, default: `60`) - Messages within this window share the same timestamp
+- `secure_file_permissions` (optional, default: `true`) - Set restrictive file permissions for security
+
+**Environment Variable Expansion:**
+
+YAML configuration supports `${VAR_NAME}` syntax for environment variable expansion:
+
+```yaml
+telegram_token: "${TELEGRAM_TOKEN}"
+vault_root: "${VAULT_ROOT}"
+```
+
+This allows you to keep sensitive values in environment variables while using a configuration file for other settings.
+
 ## Run
+
+### Using Environment Variables Only
 
 ```bash
 uv sync --extra dev
-uv run telejournal
+uv run telejournal run
 ```
+
+### Using YAML Configuration File
+
+```bash
+# Automatically discovers ./config.yaml if it exists
+uv run telejournal run
+
+# Explicitly specify config file
+uv run telejournal run /path/to/config.yaml
+```
+
+### Using CLI Overrides
+
+```bash
+uv run telejournal run \
+  --telegram-token your_token \
+  --vault-root /path/to/vault \
+  --allowed-user-ids 123456,987654
+```
+
+### Verbose Output
+
+Enable verbose logging to see startup details:
+
+```bash
+uv run telejournal run --verbose
+```
+
+### Show Version
+
+```bash
+uv run telejournal version
+```
+
+### Show Help
+
+```bash
+uv run telejournal help
+```
+
+### Using secret-tool
 
 Note: If you use linux secret service, namely `secret-tool`, you can skip the `.env` file step and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run) to automatically load secrets from your vault.
 
 ```bash
 # Run with secrets from vault
-secret-tool-run uv run telejournal
+secret-tool-run uv run telejournal run
 ```
 
 ## Test
@@ -169,18 +262,25 @@ After=network.target
 [Service]
 Type=simple
 User=youruser
-WorkingDirectory=/home/youruser/code/projects/telejournal
-EnvironmentFile=/home/youruser/code/projects/telejournal/.env
-ExecStart=/home/youruser/code/projects/telejournal/.venv/bin/uv run telegram-bot
+WorkingDirectory=/home/youruser/obsidian-journal
+EnvironmentFile=/home/youruser/.env
+ExecStart=/home/youruser/.venv/bin/telejournal run
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-- Set `User` and `WorkingDirectory` to your user and project path
-- Set `EnvironmentFile` to your `.env` file location
-- Adjust `ExecStart` to use your Python environment and entrypoint
+**Configuration details:**
+
+- `User` - The user account that will run the bot (should own the vault directory)
+- `WorkingDirectory` - Your Obsidian vault root directory (where notes are stored)
+- `EnvironmentFile` - Path to your `.env` file with required environment variables
+- `ExecStart` - Full path to the `telejournal` command (installed in your virtual environment)
+- `RestartSec` - Wait 5 seconds before restarting on failure
+
+If you installed `telejournal` system-wide via pip, you can use just `telejournal run` without the full path.
 
 ### Enable and Start the Service
 

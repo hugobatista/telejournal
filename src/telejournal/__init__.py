@@ -1,4 +1,6 @@
-"""Telegram journal bot package."""
+from importlib.metadata import version, PackageNotFoundError
 
-__all__ = ["__version__"]
-__version__ = "0.1.0"
+try:
+    __version__ = version("telejournal")
+except PackageNotFoundError:
+    __version__ = "dev"  # Fallback for uninstalled/development use
