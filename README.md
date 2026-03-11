@@ -250,9 +250,38 @@ See the script for more details and options.
 
 To run the Telegram Journal Bot as a background service on Linux, you can use systemd. This ensures the bot starts on boot and restarts automatically if it fails.
 
-### Example systemd Service File
+### Automated Service File Generation (Recommended)
 
-Create a file at `/etc/systemd/system/telejournal.service` with the following content (adjust paths and user as needed):
+The `install-service` command generates the service file automatically with sensible defaults:
+
+```bash
+telejournal install-service
+```
+
+This will:
+- Create the service file at `/etc/systemd/system/telejournal.service`
+- Use your current user account
+- Set working directory to `~/obsidian-journal`
+- Use `.env` from your home directory
+- Automatically detect the `telejournal` executable path
+
+You can customize these defaults:
+
+```bash
+# Use custom paths and user
+telejournal install-service \
+  --user myuser \
+  --working-directory /obsidian-journal \
+  --environment-file /telejournal/.env \
+  --execstart "/home/myuser/.venv/bin/telejournal run"
+
+```
+
+After running the command, follow the on-screen instructions to enable and start the service.
+
+### Manual Service File Creation
+
+Alternatively, you can manually create a service file at `/etc/systemd/system/telejournal.service` with the following content (adjust paths and user as needed):
 
 ```ini
 [Unit]
@@ -297,4 +326,5 @@ journalctl -u telejournal.service -f
 ```
 
 This will keep the bot running in the background and restart it automatically on failure or reboot.
+
 
