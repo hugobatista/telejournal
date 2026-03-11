@@ -115,7 +115,9 @@ def run_command(
     ),
 ) -> None:
     """Run the Telegram journal bot."""
-    load_dotenv()
+    # Load environment variables from .env file in current working directory.
+    # Using an explicit path ensures it works reliably when installed via pipx.
+    load_dotenv(Path.cwd() / ".env")
     setup_default_logging()
     output = OutputHandler()
 
