@@ -273,8 +273,7 @@ def test_get_telejournal_executable_path_prefers_path(
     )
 
     assert (
-        main_module._get_telejournal_executable_path()
-        == "/usr/local/bin/telejournal"
+        main_module._get_telejournal_executable_path() == "/usr/local/bin/telejournal"
     )
 
 
