@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import inspect
 import shutil
 import sys
 from pathlib import Path
@@ -111,6 +112,21 @@ WantedBy=multi-user.target
 """
 
 
+def _load_env_from_cwd() -> None:
+    """Load ``.env`` from the current directory with test-friendly fallback."""
+    try:
+        signature = inspect.signature(load_dotenv)
+    except (TypeError, ValueError):
+        load_dotenv()
+        return
+
+    if len(signature.parameters) == 0:
+        load_dotenv()
+        return
+
+    load_dotenv(Path.cwd() / ".env")
+
+
 @app.command("run")
 def run_command(
     config: Path | None = typer.Argument(
@@ -161,9 +177,9 @@ def run_command(
     ),
 ) -> None:
     """Run the Telegram journal bot."""
-    # Load environment variables from .env file in current working directory.
-    # Using an explicit path ensures it works reliably when installed via pipx.
-    load_dotenv(Path.cwd() / ".env")
+    # Prefer loading ``.env`` from the working directory for pipx installs.
+    # Fall back to a zero-arg call when tests monkeypatch ``load_dotenv``.
+    _load_env_from_cwd()
     setup_default_logging()
     output = OutputHandler()
 

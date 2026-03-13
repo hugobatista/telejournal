@@ -253,3 +253,198 @@ def test_main_calls_app(monkeypatch: pytest.MonkeyPatch) -> None:
 
     main_module.main()
     assert called["value"]
+
+
+def test_get_current_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Current-user helper should delegate to getpass.getuser."""
+    monkeypatch.setattr(main_module.getpass, "getuser", lambda: "alice")
+    assert main_module._get_current_user() == "alice"
+
+
+def test_get_telejournal_executable_path_prefers_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Executable helper should prefer telejournal from PATH when found."""
+    monkeypatch.setattr(main_module.sys, "argv", ["telejournal"])
+    monkeypatch.setattr(
+        main_module.shutil,
+        "which",
+        lambda _name: "/usr/local/bin/telejournal",
+    )
+
+    assert (
+        main_module._get_telejournal_executable_path()
+        == "/usr/local/bin/telejournal"
+    )
+
+
+def test_get_telejournal_executable_path_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Executable helper should fallback to sibling binary near Python."""
+    monkeypatch.setattr(main_module.sys, "argv", [""])
+    monkeypatch.setattr(main_module.sys, "executable", "/opt/venv/bin/python")
+
+    assert main_module._get_telejournal_executable_path() == "/opt/venv/bin/telejournal"
+
+
+def test_build_systemd_service_content() -> None:
+    """Service content should interpolate key configuration values."""
+    content = main_module._build_systemd_service_content(
+        user="alice",
+        working_directory=Path("/srv/journal"),
+        environment_file=Path("/srv/.env"),
+        execstart="/usr/local/bin/telejournal run",
+    )
+
+    assert "User=alice" in content
+    assert "WorkingDirectory=/srv/journal" in content
+    assert "EnvironmentFile=/srv/.env" in content
+    assert "ExecStart=/usr/local/bin/telejournal run" in content
+
+
+def test_load_env_from_cwd_with_explicit_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Env loader should pass cwd .env when callable accepts one argument."""
+    called: dict[str, object] = {}
+
+    def _fake_loader(path: Path) -> None:
+        called["path"] = path
+
+    monkeypatch.setattr(main_module, "load_dotenv", _fake_loader)
+    main_module._load_env_from_cwd()
+
+    assert isinstance(called["path"], Path)
+    assert Path(called["path"]).name == ".env"
+
+
+def test_load_env_from_cwd_signature_error_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env loader should fallback to zero-arg call if signature introspection fails."""
+    calls = {"count": 0}
+
+    def _zero_arg_loader() -> None:
+        calls["count"] += 1
+
+    monkeypatch.setattr(main_module, "load_dotenv", _zero_arg_loader)
+    monkeypatch.setattr(
+        main_module.inspect,
+        "signature",
+        lambda _value: (_ for _ in ()).throw(TypeError("boom")),
+    )
+
+    main_module._load_env_from_cwd()
+    assert calls["count"] == 1
+
+
+def test_install_service_command_writes_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Install-service should write a unit file using defaulted values."""
+
+    class _FakeOutput:
+        def info(self, message: str, echo: bool = False) -> None:
+            del message, echo
+
+        def error(self, message: str, echo: bool = False) -> None:
+            del message, echo
+
+    output_path = tmp_path / "system" / "telejournal.service"
+    monkeypatch.setattr(main_module, "OutputHandler", lambda: _FakeOutput())
+    monkeypatch.setattr(main_module.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(main_module, "_get_current_user", lambda: "alice")
+    monkeypatch.setattr(
+        main_module,
+        "_get_telejournal_executable_path",
+        lambda: "/usr/local/bin/telejournal",
+    )
+
+    result = RUNNER.invoke(
+        main_module.app,
+        ["install-service", "--output-path", str(output_path)],
+    )
+
+    assert result.exit_code == 0
+    service = output_path.read_text(encoding="utf-8")
+    assert "User=alice" in service
+    assert f"WorkingDirectory={tmp_path / 'obsidian-journal'}" in service
+    assert f"EnvironmentFile={tmp_path / '.env'}" in service
+    assert "ExecStart=/usr/local/bin/telejournal run" in service
+
+
+def test_install_service_command_with_explicit_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Install-service should honor explicit CLI options and expand user paths."""
+
+    class _FakeOutput:
+        def info(self, message: str, echo: bool = False) -> None:
+            del message, echo
+
+        def error(self, message: str, echo: bool = False) -> None:
+            del message, echo
+
+    output_path = tmp_path / "custom.service"
+    monkeypatch.setattr(main_module, "OutputHandler", lambda: _FakeOutput())
+
+    result = RUNNER.invoke(
+        main_module.app,
+        [
+            "install-service",
+            "--user",
+            "bob",
+            "--working-directory",
+            "~/journal-home",
+            "--environment-file",
+            "~/journal-home/.env.local",
+            "--execstart",
+            "/bin/custom-telejournal run",
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    service = output_path.read_text(encoding="utf-8")
+    assert "User=bob" in service
+    assert "ExecStart=/bin/custom-telejournal run" in service
+    assert "WorkingDirectory=~/journal-home" not in service
+    assert "EnvironmentFile=~/journal-home/.env.local" not in service
+
+
+def test_install_service_command_write_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Install-service should exit non-zero when writing the file fails."""
+    errors: list[str] = []
+
+    class _FakeOutput:
+        def info(self, message: str, echo: bool = False) -> None:
+            del message, echo
+
+        def error(self, message: str, echo: bool = False) -> None:
+            del echo
+            errors.append(message)
+
+    def _raise_write_error(
+        _self: Path,
+        _data: str,
+        encoding: str | None = None,
+    ) -> int:
+        del encoding
+        raise OSError("disk full")
+
+    output_path = tmp_path / "fail" / "telejournal.service"
+    monkeypatch.setattr(main_module, "OutputHandler", lambda: _FakeOutput())
+    monkeypatch.setattr(main_module.Path, "write_text", _raise_write_error)
+
+    result = RUNNER.invoke(
+        main_module.app,
+        ["install-service", "--output-path", str(output_path)],
+    )
+
+    assert result.exit_code == 1
+    assert any("Failed to write service file" in message for message in errors)
