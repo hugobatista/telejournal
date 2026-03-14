@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+from pathlib import Path
 import sys
 
 _LOG_FORMAT = "[%(asctime)s] %(levelname)s [%(name)s] %(message)s"
 _LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _SYSLOG_FORMAT = "telejournal[%(process)d]: %(message)s"
 _LOGGER_NAME = "telejournal"
+_SYSLOG_SOCKET_PATH = Path("/dev/log")
 
 
 def _add_console_handler(logger: logging.Logger) -> None:
@@ -21,11 +23,30 @@ def _add_console_handler(logger: logging.Logger) -> None:
     logger.addHandler(console_handler)
 
 
+def _is_syslog_socket_available() -> bool:
+    """Return True when the platform syslog unix socket is available."""
+    try:
+        return _SYSLOG_SOCKET_PATH.exists() and _SYSLOG_SOCKET_PATH.is_socket()
+    except OSError:
+        return False
+
+
 def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> None:
     """Add syslog handler when available on the host platform."""
+    if not _is_syslog_socket_available():
+        if not silent:
+            print(
+                (
+                    "Warning: Syslog socket /dev/log is unavailable; "
+                    "continuing without syslog logging."
+                ),
+                file=sys.stderr,
+            )
+        return
+
     try:
         syslog_handler = logging.handlers.SysLogHandler(
-            address="/dev/log",
+            address=str(_SYSLOG_SOCKET_PATH),
             facility=logging.handlers.SysLogHandler.LOG_USER,
         )
         syslog_handler.setFormatter(logging.Formatter(_SYSLOG_FORMAT))

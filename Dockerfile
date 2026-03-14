@@ -14,7 +14,7 @@ COPY . /app
 
 RUN pip install --no-cache --upgrade pip \
  && pip install --no-cache /app \
- && addgroup --system --gid 100 app \
+ && addgroup --system --gid 1000 app \
  && adduser --system --uid 1000 --ingroup app app \
  && mkdir -p /data \
  && chown -R app:app /data
