@@ -18,6 +18,8 @@ from telejournal.bot import (
     LAST_PROMPT_AT_KEY,
     LAST_WINDOW_AT_KEY,
     MOOD_CALLBACK_PREFIX,
+    STARTUP_JOB_NAME,
+    STARTUP_MESSAGE,
     TAG_CALLBACK_PREFIX,
     JournalBot,
     _mood_keyboard,
@@ -43,14 +45,15 @@ class _FakeJobQueue:
         callback: object,
         *,
         when: int,
-        data: dict[str, Any],
-        name: str,
+        data: dict[str, Any] | None = None,
+        name: str | None = None,
     ) -> None:
-        self.once_jobs[name] = {
+        job_name = name or f"job-{len(self.once_jobs)}"
+        self.once_jobs[job_name] = {
             "callback": callback,
             "when": when,
             "data": data,
-            "name": name,
+            "name": job_name,
         }
 
     def run_repeating(self, callback: object, *, interval: int, first: int) -> None:
@@ -577,7 +580,59 @@ def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
 
     jq = _FakeJobQueue()
     journal_bot.register_jobs(jq)  # type: ignore[arg-type]
+    assert STARTUP_JOB_NAME in jq.once_jobs
+    assert jq.once_jobs[STARTUP_JOB_NAME]["when"] == 0
     assert jq.repeat["interval"] == 300
+
+
+@pytest.mark.asyncio
+async def test_send_startup_message_notifies_all_configured_chats(
+    journal_bot: JournalBot,
+) -> None:
+    """Startup greeting should be sent to every configured private chat."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={5, 2, 9},
+    )
+    context = _context()
+
+    await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
+
+    sent_chat_ids = [
+        call.args[0] for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+    ]
+    sent_messages = [
+        call.args[1] for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+    ]
+    assert sent_chat_ids == [2, 5, 9]
+    assert sent_messages == [STARTUP_MESSAGE, STARTUP_MESSAGE, STARTUP_MESSAGE]
+
+
+@pytest.mark.asyncio
+async def test_send_startup_message_continues_after_send_failure(
+    journal_bot: JournalBot,
+) -> None:
+    """Startup greeting should continue sending when one chat rejects it."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1, 2, 3},
+    )
+    context = _context()
+    delivered: list[int] = []
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        assert text == STARTUP_MESSAGE
+        if chat_id == 2:
+            raise OSError("network")
+        delivered.append(chat_id)
+
+    context.bot.send_message = AsyncMock(side_effect=_send_message)
+
+    await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
+
+    assert delivered == [1, 3]
 
 
 def test_get_active_chats_resets_non_set(journal_bot: JournalBot) -> None:

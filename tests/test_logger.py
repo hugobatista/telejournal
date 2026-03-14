@@ -17,6 +17,27 @@ def test_setup_default_logging_returns_named_logger() -> None:
     assert logger.name == "telejournal"
 
 
+def test_setup_default_logging_falls_back_to_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default setup should keep logs visible when syslog is unavailable."""
+    monkeypatch.setattr(
+        logger_module,
+        "_is_syslog_socket_available",
+        lambda: False,
+    )
+
+    logger = setup_default_logging()
+    console_handlers = [
+        handler
+        for handler in logger.handlers
+        if isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.handlers.SysLogHandler)
+    ]
+
+    assert console_handlers
+
+
 def test_setup_logging_invalid_level_defaults_to_info() -> None:
     """Invalid levels should safely fall back to INFO."""
     logger = setup_logging("NOT_A_LEVEL", verbose=False)
@@ -38,7 +59,7 @@ def test_setup_logging_verbose_adds_console_handler() -> None:
 def test_setup_logging_skips_syslog_when_socket_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unavailable syslog socket should not attach a syslog handler."""
+    """Unavailable syslog socket should fall back to console logging."""
     monkeypatch.setattr(
         logger_module,
         "_is_syslog_socket_available",
@@ -50,6 +71,32 @@ def test_setup_logging_skips_syslog_when_socket_unavailable(
         isinstance(handler, logging.handlers.SysLogHandler)
         for handler in logger.handlers
     )
+    assert any(
+        isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.handlers.SysLogHandler)
+        for handler in logger.handlers
+    )
+
+
+def test_setup_logging_avoids_duplicate_console_handler_on_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verbose mode should not duplicate the console handler on fallback."""
+    monkeypatch.setattr(
+        logger_module,
+        "_is_syslog_socket_available",
+        lambda: False,
+    )
+
+    logger = setup_logging("INFO", verbose=True)
+    console_handlers = [
+        handler
+        for handler in logger.handlers
+        if isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.handlers.SysLogHandler)
+    ]
+
+    assert len(console_handlers) == 1
 
 
 def test_setup_logging_adds_syslog_when_socket_available(
