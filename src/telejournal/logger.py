@@ -31,7 +31,7 @@ def _is_syslog_socket_available() -> bool:
         return False
 
 
-def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> None:
+def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> bool:
     """Add syslog handler when available on the host platform."""
     if not _is_syslog_socket_available():
         if not silent:
@@ -42,7 +42,7 @@ def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> None:
                 ),
                 file=sys.stderr,
             )
-        return
+        return False
 
     try:
         syslog_handler = logging.handlers.SysLogHandler(
@@ -51,6 +51,7 @@ def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> None:
         )
         syslog_handler.setFormatter(logging.Formatter(_SYSLOG_FORMAT))
         logger.addHandler(syslog_handler)
+        return True
     except Exception as exc:  # pragma: no cover - platform-specific
         if not silent:
             print(
@@ -60,6 +61,7 @@ def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> None:
                 ),
                 file=sys.stderr,
             )
+        return False
 
 
 def setup_default_logging() -> logging.Logger:
@@ -67,7 +69,8 @@ def setup_default_logging() -> logging.Logger:
     logger = logging.getLogger(_LOGGER_NAME)
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
-    _add_syslog_handler(logger, silent=True)
+    if not _add_syslog_handler(logger, silent=True):
+        _add_console_handler(logger)
     return logger
 
 
@@ -80,8 +83,8 @@ def setup_logging(
     logger.setLevel(level)
     logger.handlers.clear()
 
-    _add_syslog_handler(logger, silent=False)
-    if verbose:
+    syslog_enabled = _add_syslog_handler(logger, silent=False)
+    if verbose or not syslog_enabled:
         _add_console_handler(logger)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
