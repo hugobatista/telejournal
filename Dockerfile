@@ -12,7 +12,7 @@ ENV PIP_ROOT_USER_ACTION=ignore
 WORKDIR /app
 COPY pyproject.toml README.md /app/
 COPY src /app/src
-COPY config.example.yaml /app/config.yaml
+COPY config.example.yaml /app/config/config.yaml
 
 
 RUN pip install --no-cache --upgrade pip \
@@ -29,4 +29,4 @@ USER app
 HEALTHCHECK --interval=300s --timeout=10s --start-period=5s --retries=3 \
     CMD telejournal version || exit 1
 
-ENTRYPOINT ["telejournal","run","/app/config.yaml"]
+ENTRYPOINT ["telejournal","run","/app/config/config.yaml"]
