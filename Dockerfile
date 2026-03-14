@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # Links Docker image with repository
 LABEL org.opencontainers.image.source=https://go.hugobatista.com/gh/telejournal
@@ -14,7 +14,8 @@ COPY . /app
 
 RUN pip install --no-cache --upgrade pip \
  && pip install --no-cache /app \
- && addgroup --system app && adduser --system --group app \
+ && addgroup --system --gid 100 app \
+ && adduser --system --uid 1000 --ingroup app app \
  && mkdir -p /data \
  && chown -R app:app /data
 
@@ -25,4 +26,4 @@ USER app
 HEALTHCHECK --interval=300s --timeout=10s --start-period=5s --retries=3 \
     CMD telejournal version || exit 1
 
-ENTRYPOINT ["telejournal"]
+ENTRYPOINT ["telejournal","run"]
