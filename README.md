@@ -7,6 +7,22 @@
 
 A Telegram bot that journals every private message into your Obsidian daily notes.
 
+## Demo
+
+From Telegram message capture to Obsidian daily note output:
+
+### Telegram Input
+
+User messages sent in a private chat are captured by the bot, including text and media.
+
+![Telegram demo](docs/telejournal-telegram-demo.jpeg)
+
+### Obsidian Output
+
+Captured content is appended to your daily note with timestamped entries and structured formatting.
+
+![Obsidian demo](docs/telejournal-obsidian-demo.jpeg)
+
 ## Features
 
 - Private chat journal capture for text, photos, voice recordings, video messages (including circular video notes), and locations
