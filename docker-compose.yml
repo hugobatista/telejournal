@@ -12,7 +12,8 @@ services:
 
 
     volumes:
-      - ./obsidian-journal:/data:Z
+      - ./obsidian-journal:/telejournal/data:Z
+      - ./config:/telejournal/config:Z
     
     # Network (for future services)
     networks:
