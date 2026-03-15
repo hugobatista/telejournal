@@ -12,7 +12,7 @@ ENV PIP_ROOT_USER_ACTION=ignore
 WORKDIR /telejournal
 COPY pyproject.toml README.md /telejournal/
 COPY src /telejournal/src
-COPY config.example.yaml /telejournal/config/example.config.yaml
+COPY config.example.yaml /telejournal/config/config.example.yaml
 
 
 RUN pip install --no-cache --upgrade pip \
@@ -20,7 +20,9 @@ RUN pip install --no-cache --upgrade pip \
  && addgroup --system --gid 1000 telejournal \
  && adduser --system --uid 1000 --ingroup telejournal telejournal \
  && mkdir -p /telejournal/data \
- && chown -R telejournal:telejournal /telejournal/data
+ && mkdir -p /telejournal/config \
+ && chown -R telejournal:telejournal /telejournal/data \
+ && chown -R telejournal:telejournal /telejournal/config
 
 VOLUME /telejournal/data
 VOLUME /telejournal/config
@@ -30,4 +32,4 @@ USER telejournal
 HEALTHCHECK --interval=300s --timeout=10s --start-period=5s --retries=3 \
     CMD telejournal version || exit 1
 
-ENTRYPOINT ["telejournal","run","/telejournal/config/config.yaml"]
+ENTRYPOINT ["telejournal","run","/telejournal/config/config.example.yaml"]
