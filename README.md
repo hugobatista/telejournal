@@ -7,6 +7,15 @@
 
 A Telegram bot that journals every private message into your Obsidian daily notes.
 
+## Demo
+User messages sent in a private chat are captured by the bot, including text and media.
+
+![Telegram demo](docs/telejournal-telegram-demo.jpeg)
+
+Captured content is appended to your daily note with timestamped entries and structured formatting.
+
+![Obsidian demo](docs/telejournal-obsidian-demo.jpeg)
+
 ## Features
 
 - Private chat journal capture for text, photos, voice recordings, video messages (including circular video notes), and locations
@@ -16,6 +25,110 @@ A Telegram bot that journals every private message into your Obsidian daily note
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
 - Tags and mood management with inline keyboard callbacks
+
+## Usage
+
+### Installation
+
+Choose one installation method:
+
+From PyPI (recommended for end users):
+
+```bash
+python -m pip install --upgrade telejournal
+```
+
+From source (recommended for contributors):
+
+```bash
+git clone https://github.com/hugobatista/telejournal.git
+cd telejournal
+uv sync --extra dev
+```
+
+If running from source, use `uv run` before commands in the sections below.
+Example: `uv run telejournal run --verbose`.
+
+### Quick Start
+
+1. Configure your environment variables as documented in `Environment`.
+
+2. Start the bot:
+
+```bash
+telejournal run --verbose
+```
+
+3. Open your bot in Telegram and send:
+
+```text
+/help
+```
+
+4. Send a normal message (for example, `First journal entry`) and confirm it appears in:
+
+```text
+<VAULT_ROOT>/YYYY/YYYY-MM-DD.md
+```
+
+### Run Modes
+
+Use whichever configuration style best fits your setup.
+
+Environment variables only:
+
+```bash
+telejournal run
+```
+
+YAML configuration file (`config.yaml` auto-detected if present):
+
+```bash
+telejournal run
+telejournal run /path/to/config.yaml
+```
+
+CLI overrides (highest priority):
+
+```bash
+telejournal run \
+  --telegram-token your_token \
+  --vault-root /path/to/vault \
+  --allowed-user-ids 123456,987654 \
+  --message-timestamp-window-seconds 60 \
+  --secure-file-permissions
+```
+
+### Telegram Commands
+
+After the bot is running, these commands are available in your private chat:
+
+- `/help` Show bot usage summary
+- `/setdate YYYY-MM-DD [HH:MM:SS]` Set target note date/time
+- `/resetdate` Return to current day
+- `/tags` Show tag buttons
+- `/tags work kids` Add/select one or more tags
+- `/mood` Open mood picker
+- `/show` Show current effective day note
+- `/show YYYY-MM-DD` Show a specific day note
+- `/delete` Delete last entry and show deleted content
+- `/delete day [YYYY-MM-DD]` Delete full day note
+
+### Helpful CLI Commands
+
+```bash
+telejournal version
+telejournal help
+```
+
+### Using secret-tool
+
+If you use Linux secret service (`secret-tool`), you can skip a local `.env`
+and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run):
+
+```bash
+secret-tool-run telejournal run
+```
 
 ## Environment
 
@@ -82,63 +195,6 @@ vault_root: "${VAULT_ROOT}"
 ```
 
 This allows you to keep sensitive values in environment variables while using a configuration file for other settings.
-
-## Run
-
-### Using Environment Variables Only
-
-```bash
-uv sync --extra dev
-uv run telejournal run
-```
-
-### Using YAML Configuration File
-
-```bash
-# Automatically discovers ./config.yaml if it exists
-uv run telejournal run
-
-# Explicitly specify config file
-uv run telejournal run /path/to/config.yaml
-```
-
-### Using CLI Overrides
-
-```bash
-uv run telejournal run \
-  --telegram-token your_token \
-  --vault-root /path/to/vault \
-  --allowed-user-ids 123456,987654
-```
-
-### Verbose Output
-
-Enable verbose logging to see startup details:
-
-```bash
-uv run telejournal run --verbose
-```
-
-### Show Version
-
-```bash
-uv run telejournal version
-```
-
-### Show Help
-
-```bash
-uv run telejournal help
-```
-
-### Using secret-tool
-
-Note: If you use linux secret service, namely `secret-tool`, you can skip the `.env` file step and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run) to automatically load secrets from your vault.
-
-```bash
-# Run with secrets from vault
-secret-tool-run uv run telejournal run
-```
 
 ## Test
 

@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatType
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -59,6 +60,8 @@ TAG_CALLBACK_PREFIX = "tag:"
 DELETE_CALLBACK_PREFIX = "delete:"
 ALBUM_JOB_PREFIX = "album-flush"
 ALBUM_FLUSH_SECONDS = 2
+STARTUP_JOB_NAME = "startup-hello"
+STARTUP_MESSAGE = "Hello! Telejournal is starting."
 
 TAG_CHOICES = ["family", "health", "love", "hobby", "other", "finance", "social"]
 MAX_TELEGRAM_TEXT_LEN = 4096
@@ -1070,6 +1073,20 @@ class JournalBot:
             chat_data[LAST_PROMPT_AT_KEY] = now
             chat_data[LAST_PROMPT_NOTE_KEY] = note_key
 
+    async def send_startup_message(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Send a startup greeting to each configured private chat."""
+        for chat_id in sorted(self._settings.allowed_user_ids):
+            try:
+                await context.bot.send_message(chat_id, STARTUP_MESSAGE)
+            except (OSError, TelegramError):
+                LOGGER.exception(
+                    "Failed to send startup greeting to chat_id=%s",
+                    chat_id,
+                )
+
     async def handle_error(
         self,
         update: object,
@@ -1120,4 +1137,5 @@ class JournalBot:
 
     def register_jobs(self, job_queue: JobQueue) -> None:  # type: ignore[type-arg]
         """Register periodic reminder jobs."""
+        job_queue.run_once(self.send_startup_message, when=0, name=STARTUP_JOB_NAME)
         job_queue.run_repeating(self.check_mood_timers, interval=300, first=300)

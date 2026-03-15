@@ -1,0 +1,6 @@
+telegram_token: "${TELEGRAM_TOKEN}"
+vault_root: /data
+allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
+log_level: INFO
+message_timestamp_window_seconds: 60
+secure_file_permissions: true
