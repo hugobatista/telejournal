@@ -57,15 +57,17 @@ def render_message_markdown(message: Message) -> str:
 
 
 def extract_reply_quote(message: Message) -> str | None:
-    """Extract quoted text from a self-reply message, or None if not applicable."""
+    """Extract quoted text from a self-reply or bot-reply, or None if not applicable."""
     reply_to = message.reply_to_message
     if not reply_to:
         return None
 
-    # Only quote self-replies (same user)
     if not message.from_user or not reply_to.from_user:
         return None
-    if message.from_user.id != reply_to.from_user.id:
+
+    is_self_reply = message.from_user.id == reply_to.from_user.id
+    is_bot_reply = getattr(reply_to.from_user, "is_bot", False)
+    if not is_self_reply and not is_bot_reply:
         return None
 
     # Extract text or caption from the replied message
