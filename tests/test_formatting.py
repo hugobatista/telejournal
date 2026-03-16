@@ -322,3 +322,24 @@ def test_extract_reply_quote_missing_from_user() -> None:
         reply_to_message=replied_msg,
     )
     assert extract_reply_quote(message) is None  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_bot_reply() -> None:
+    """Reply to a bot message should include the bot's message as a quote."""
+    replied_msg = SimpleNamespace(
+        text="On this day in 2023 you wrote...",
+        text_markdown_urled="On this day in 2023 you wrote...",
+        caption=None,
+        from_user=SimpleNamespace(id=999, is_bot=True),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="my reply to the bot",
+        from_user=SimpleNamespace(id=1, is_bot=False),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "On this day in 2023 you wrote..."  # type: ignore[arg-type]
