@@ -1,0 +1,4 @@
+1) make sure you always run ./validate.sh when implementing a new feature or fixing a bug. This will ensure that your code adheres to the project's 
+coding standards and passes all tests before being merged into the main branch.
+2) make sure you also respect python.insctructions.md when implemeting python code. This file contains important guidelines for writing clean and maintainable Python code in this project. 
+3) make sure to keep readme.md up to date with any new features or changes you make to the project. This will help other developers understand how to use and contribute to the project effectively.

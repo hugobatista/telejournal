@@ -11,3 +11,4 @@ py.typed
 .mypy_cache/
 .env.docker
 obsidian-journal/
+obsidian-journal-dev/

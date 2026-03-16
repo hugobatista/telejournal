@@ -48,12 +48,14 @@ def test_load_env_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_TOKEN", "x")
     monkeypatch.setenv("VAULT_ROOT", "/tmp/vault")
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1,2")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "09:00")
 
     config = load_env_config()
 
     assert config["telegram_token"] == "x"
     assert config["vault_root"] == "/tmp/vault"
     assert config["allowed_user_ids"] == "1,2"
+    assert config["daily_brief_time_utc"] == "09:00"
 
 
 def test_merge_configs_ignores_none() -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from telejournal.config import (
+    _parse_daily_brief_time_utc,
     _normalize_allowed_user_ids,
     _parse_allowed_user_ids,
     load_settings,
@@ -69,6 +70,7 @@ def test_load_settings_builds_defaults(
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1, 2")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "90")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "09:30")
 
     settings = load_settings()
 
@@ -77,6 +79,8 @@ def test_load_settings_builds_defaults(
     assert settings.log_level == "DEBUG"
     assert settings.allowed_user_ids == {1, 2}
     assert settings.message_timestamp_window_seconds == 90
+    assert settings.daily_brief_time_utc is not None
+    assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "09:30:00"
 
 
 def test_load_settings_defaults_window_seconds(
@@ -91,6 +95,56 @@ def test_load_settings_defaults_window_seconds(
 
     settings = load_settings()
     assert settings.message_timestamp_window_seconds == 60
+
+
+def test_load_settings_daily_brief_defaults_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Daily brief should default to disabled when not configured."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
+    monkeypatch.delenv("DAILY_BRIEF_TIME_UTC", raising=False)
+
+    settings = load_settings()
+    assert settings.daily_brief_time_utc is None
+
+
+def test_load_settings_daily_brief_explicit_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Daily brief should be disabled when explicitly set to 0."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "0")
+
+    settings = load_settings()
+    assert settings.daily_brief_time_utc is None
+
+
+def test_parse_daily_brief_time_none_and_numeric_zero() -> None:
+    """Daily brief parser should support disabled values from varied sources."""
+    assert _parse_daily_brief_time_utc(None) is None
+    assert _parse_daily_brief_time_utc(0) is None
+
+
+@pytest.mark.parametrize("value", ["25:00", "9:30", "abc", "24:00:00"])
+def test_load_settings_rejects_invalid_daily_brief_time(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    value: str,
+) -> None:
+    """Invalid daily brief values should fail fast with a clear error."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", value)
+
+    with pytest.raises(ValueError, match="DAILY_BRIEF_TIME_UTC"):
+        load_settings()
 
 
 def test_load_settings_rejects_negative_window_seconds(
@@ -155,6 +209,7 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
                 "log_level: warning",
                 "message_timestamp_window_seconds: 30",
                 "secure_file_permissions: false",
+                "daily_brief_time_utc: '07:45'",
             ]
         ),
         encoding="utf-8",
@@ -167,6 +222,8 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
     assert settings.log_level == "WARNING"
     assert settings.message_timestamp_window_seconds == 30
     assert settings.secure_file_permissions is False
+    assert settings.daily_brief_time_utc is not None
+    assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "07:45:00"
 
 
 def test_load_settings_priority_cli_over_yaml_over_env(
@@ -179,6 +236,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1,2")
     monkeypatch.setenv("LOG_LEVEL", "error")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "10")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "08:00")
 
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(
@@ -189,6 +247,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
                 'allowed_user_ids: "3,4"',
                 "log_level: warning",
                 "message_timestamp_window_seconds: 20",
+                "daily_brief_time_utc: '10:15'",
             ]
         ),
         encoding="utf-8",
@@ -200,6 +259,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
             "telegram_token": "cli-token",
             "log_level": "debug",
             "message_timestamp_window_seconds": 99,
+            "daily_brief_time_utc": "13:45",
         },
     )
 
@@ -208,6 +268,8 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     assert settings.allowed_user_ids == {3, 4}
     assert settings.log_level == "DEBUG"
     assert settings.message_timestamp_window_seconds == 99
+    assert settings.daily_brief_time_utc is not None
+    assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "13:45:00"
 
 
 def test_load_settings_cli_env_expansion(

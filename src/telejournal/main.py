@@ -44,6 +44,7 @@ def _build_cli_overrides(
     log_level: str | None,
     message_timestamp_window_seconds: int | None,
     secure_file_permissions: bool | None,
+    daily_brief_time_utc: str | None,
 ) -> dict[str, Any]:
     """Build CLI override mapping from run command arguments."""
     return {
@@ -53,6 +54,7 @@ def _build_cli_overrides(
         "log_level": log_level,
         "message_timestamp_window_seconds": message_timestamp_window_seconds,
         "secure_file_permissions": secure_file_permissions,
+        "daily_brief_time_utc": daily_brief_time_utc,
     }
 
 
@@ -170,6 +172,11 @@ def run_command(
         "--secure-file-permissions/--no-secure-file-permissions",
         help="Enable secure file permissions for created files and dirs.",
     ),
+    daily_brief_time_utc: str | None = typer.Option(
+        None,
+        "--daily-brief-time-utc",
+        help="Daily UTC time for on-this-day brief (HH:MM, HH:MM:SS, or 0 to disable).",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -191,6 +198,7 @@ def run_command(
         log_level,
         message_timestamp_window_seconds,
         secure_file_permissions,
+        daily_brief_time_utc,
     )
 
     try:

@@ -234,11 +234,13 @@ def test_build_cli_overrides(tmp_path: Path) -> None:
         "INFO",
         30,
         True,
+        "09:15",
     )
 
     assert overrides["telegram_token"] == "token"
     assert overrides["vault_root"] == str(tmp_path)
     assert overrides["allowed_user_ids"] == "1,2"
+    assert overrides["daily_brief_time_utc"] == "09:15"
 
 
 def test_main_calls_app(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, time
 from pathlib import Path
+import re
 from typing import Any
 
 from telejournal.config_loader import expand_env_vars, load_env_config, load_yaml_config
@@ -19,12 +21,14 @@ class Settings:
     log_level: str = "INFO"
     message_timestamp_window_seconds: int = 60
     secure_file_permissions: bool = True
+    daily_brief_time_utc: time | None = None
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "log_level": "INFO",
     "message_timestamp_window_seconds": 60,
     "secure_file_permissions": True,
+    "daily_brief_time_utc": "09:00",
 }
 
 
@@ -62,6 +66,32 @@ def _normalize_allowed_user_ids(raw_value: Any) -> set[int]:
             )
         return parsed
     raise ValueError("TELEGRAM_ALLOWED_USER_IDS must be a CSV string or list")
+
+
+def _parse_daily_brief_time_utc(raw_value: Any) -> time | None:
+    """Parse daily brief time in UTC using HH:MM, HH:MM:SS, or 0 (disabled)."""
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, str):
+        value = raw_value.strip()
+    else:
+        value = str(raw_value).strip()
+
+    if value == "0":
+        return None
+
+    if not re.fullmatch(r"\d{2}:\d{2}(?::\d{2})?", value):
+        raise ValueError("DAILY_BRIEF_TIME_UTC must be '0', 'HH:MM', or 'HH:MM:SS'")
+
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(value, fmt).time()
+            return parsed.replace(tzinfo=UTC)
+        except ValueError:
+            continue
+
+    raise ValueError("DAILY_BRIEF_TIME_UTC must be '0', 'HH:MM', or 'HH:MM:SS'")
 
 
 def _resolve_config_path(config_path: Path | None) -> Path | None:
@@ -118,6 +148,9 @@ def load_settings(
         raise ValueError("MESSAGE_TIMESTAMP_WINDOW_SECONDS must be >= 0")
 
     secure_permissions = _parse_bool(merged.get("secure_file_permissions", True))
+    daily_brief_time_utc = _parse_daily_brief_time_utc(
+        merged.get("daily_brief_time_utc", "0")
+    )
 
     return Settings(
         telegram_token=token,
@@ -126,4 +159,5 @@ def load_settings(
         log_level=log_level,
         message_timestamp_window_seconds=window_seconds,
         secure_file_permissions=secure_permissions,
+        daily_brief_time_utc=daily_brief_time_utc,
     )

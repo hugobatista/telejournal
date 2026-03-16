@@ -443,3 +443,57 @@ async def test_secure_permissions_enabled(tmp_path: Path) -> None:
     photo_path = attachments_dir / "20260307_183442.jpg"
     photo_perms = photo_path.stat().st_mode & 0o777
     assert photo_perms == 0o600, f"Expected 0o600, got {oct(photo_perms)}"
+
+
+@pytest.mark.asyncio
+async def test_get_same_day_previous_year_notes(tmp_path: Path) -> None:
+    """Historical lookup should return all prior-year same-day note contents."""
+    repo = VaultRepository(tmp_path)
+    reference_dt = datetime(2026, 3, 16, 9, 0, 0, tzinfo=UTC)
+
+    year_2024 = tmp_path / "2024"
+    year_2025 = tmp_path / "2025"
+    year_2026 = tmp_path / "2026"
+    for year_dir in (year_2024, year_2025, year_2026):
+        year_dir.mkdir(parents=True, exist_ok=True)
+
+    (year_2024 / "2024-03-16.md").write_text("from 2024", encoding="utf-8")
+    (year_2025 / "2025-03-16.md").write_text("from 2025", encoding="utf-8")
+    (year_2025 / "2025-03-15.md").write_text("wrong date", encoding="utf-8")
+    (year_2026 / "2026-03-16.md").write_text("current year", encoding="utf-8")
+
+    notes = await repo.get_same_day_previous_year_notes(reference_dt)
+
+    assert [note_dt.year for note_dt, _ in notes] == [2024, 2025]
+    assert [content for _, content in notes] == ["from 2024", "from 2025"]
+
+
+@pytest.mark.asyncio
+async def test_get_same_day_previous_year_notes_skips_non_file_paths(
+    tmp_path: Path,
+) -> None:
+    """Historical lookup should ignore matching paths that are directories."""
+    repo = VaultRepository(tmp_path)
+    reference_dt = datetime(2026, 3, 16, 9, 0, 0, tzinfo=UTC)
+
+    year_2024 = tmp_path / "2024"
+    year_2024.mkdir(parents=True, exist_ok=True)
+    (year_2024 / "2024-03-16.md").mkdir(parents=True, exist_ok=True)
+
+    notes = await repo.get_same_day_previous_year_notes(reference_dt)
+    assert notes == []
+
+
+@pytest.mark.asyncio
+async def test_get_same_day_previous_year_notes_skips_non_year_entries(
+    tmp_path: Path,
+) -> None:
+    """Historical lookup should ignore files and non-numeric directories."""
+    repo = VaultRepository(tmp_path)
+    reference_dt = datetime(2026, 3, 16, 9, 0, 0, tzinfo=UTC)
+
+    (tmp_path / "README.md").write_text("ignore me", encoding="utf-8")
+    (tmp_path / "notes").mkdir(parents=True, exist_ok=True)
+
+    notes = await repo.get_same_day_previous_year_notes(reference_dt)
+    assert notes == []

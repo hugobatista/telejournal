@@ -223,6 +223,46 @@ class VaultRepository:
         async with aiofiles.open(note_path, "r", encoding="utf-8") as handle:
             return await handle.read()
 
+    async def get_same_day_previous_year_notes(
+        self,
+        reference_dt: datetime,
+    ) -> list[tuple[datetime, str]]:
+        """Return full note contents for the same month/day in prior years."""
+
+        def _collect_paths() -> list[tuple[int, Path]]:
+            target_mm_dd = reference_dt.strftime("%m-%d")
+            matches: list[tuple[int, Path]] = []
+            for child in self._vault_root.iterdir():
+                if not child.is_dir() or not child.name.isdigit():
+                    continue
+
+                year = int(child.name)
+                if year >= reference_dt.year:
+                    continue
+
+                note_path = child / f"{year}-{target_mm_dd}.md"
+                if note_path.exists() and note_path.is_file():
+                    matches.append((year, note_path))
+
+            matches.sort(key=lambda item: item[0])
+            return matches
+
+        matched_paths = await asyncio.to_thread(_collect_paths)
+        results: list[tuple[datetime, str]] = []
+
+        for year, note_path in matched_paths:
+            async with aiofiles.open(note_path, "r", encoding="utf-8") as handle:
+                content = await handle.read()
+            note_dt = datetime(
+                year,
+                reference_dt.month,
+                reference_dt.day,
+                tzinfo=UTC,
+            )
+            results.append((note_dt, content))
+
+        return results
+
     async def delete_last_entry(self, note_dt: datetime) -> str | None:
         """Delete the last body entry block and return removed content."""
         note_path = self.get_note_path(note_dt)

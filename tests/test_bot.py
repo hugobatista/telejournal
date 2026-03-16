@@ -14,16 +14,19 @@ from telegram.constants import ChatType
 from telejournal.bot import (
     ACTIVE_CHATS_KEY,
     ALBUMS_KEY,
+    DAILY_BRIEF_JOB_NAME,
     DELETE_CALLBACK_PREFIX,
     LAST_PROMPT_AT_KEY,
     LAST_WINDOW_AT_KEY,
     MOOD_CALLBACK_PREFIX,
+    NO_MEMORIES_MESSAGE,
     STARTUP_JOB_NAME,
     STARTUP_MESSAGE,
     TAG_CALLBACK_PREFIX,
     JournalBot,
     _mood_keyboard,
     _tags_keyboard,
+    _chunk_text,
     _truncate_message,
 )
 from telejournal.config import Settings
@@ -34,6 +37,7 @@ class _FakeJobQueue:
     def __init__(self) -> None:
         self.once_jobs: dict[str, dict[str, Any]] = {}
         self.repeat: dict[str, Any] = {}
+        self.daily: dict[str, Any] = {}
 
     def get_jobs_by_name(self, name: str) -> list[object]:
         if name in self.once_jobs:
@@ -58,6 +62,9 @@ class _FakeJobQueue:
 
     def run_repeating(self, callback: object, *, interval: int, first: int) -> None:
         self.repeat = {"callback": callback, "interval": interval, "first": first}
+
+    def run_daily(self, callback: object, *, time: object, name: str) -> None:
+        self.daily[name] = {"callback": callback, "time": time, "name": name}
 
 
 @pytest.fixture
@@ -85,6 +92,7 @@ def journal_bot(tmp_path: Path) -> JournalBot:
         get_last_entry_time=AsyncMock(
             return_value=datetime.now(UTC) - timedelta(hours=6)
         ),
+        get_same_day_previous_year_notes=AsyncMock(return_value=[]),
     )
     return bot
 
@@ -167,8 +175,9 @@ async def test_help_mood_setdate_resetdate_commands(journal_bot: JournalBot) -> 
     await journal_bot.resetdate_command(update, context)  # type: ignore
     await journal_bot.delete_command(update, context)  # type: ignore
     await journal_bot.show_command(update, context)  # type: ignore
+    await journal_bot.todayinhistory_command(update, context)  # type: ignore
 
-    assert update.effective_message.reply_text.await_count == 6
+    assert update.effective_message.reply_text.await_count == 7
 
 
 @pytest.mark.asyncio
@@ -400,6 +409,28 @@ def test_truncate_message_branch() -> None:
     assert _truncate_message("x" * 20, max_len=10).endswith("...")
 
 
+def test_chunk_text_branches() -> None:
+    """Chunking helper should split lines and fallback to hard boundaries."""
+    assert _chunk_text("abc", chunk_size=10) == ["abc"]
+
+    with_newlines = "line1\nline2\nline3"
+    chunks = _chunk_text(with_newlines, chunk_size=8)
+    assert chunks == ["line1", "line2", "line3"]
+
+    no_newline = "x" * 20
+    chunks = _chunk_text(no_newline, chunk_size=7)
+    assert chunks == ["xxxxxxx", "xxxxxxx", "xxxxxx"]
+
+    leading_newline = "\n" + ("y" * 9)
+    chunks = _chunk_text(leading_newline, chunk_size=5)
+    assert chunks == ["\nyyyy", "yyyyy"]
+
+    # Cover branch where rstrip() empties chunk and hard split is used.
+    spaces_before_newline = "   \nabcdef"
+    chunks = _chunk_text(spaces_before_newline, chunk_size=6)
+    assert chunks == ["   \nab", "cdef"]
+
+
 @pytest.mark.asyncio
 async def test_show_command_error_paths(journal_bot: JournalBot) -> None:
     """Show command should validate args and handle missing note content."""
@@ -427,6 +458,16 @@ async def test_show_command_returns_when_message_missing(
     update = _private_update()
     update.effective_message = None
     await journal_bot.show_command(update, _context())
+
+
+@pytest.mark.asyncio
+async def test_todayinhistory_command_returns_when_message_missing(
+    journal_bot: JournalBot,
+) -> None:
+    """Today-in-history command should no-op when effective_message is missing."""
+    update = _private_update()
+    update.effective_message = None
+    await journal_bot.todayinhistory_command(update, _context())
 
 
 @pytest.mark.asyncio
@@ -585,6 +626,23 @@ def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
     assert jq.repeat["interval"] == 300
 
 
+def test_register_jobs_daily_brief_toggle(journal_bot: JournalBot) -> None:
+    """Daily brief job should only be scheduled when configured."""
+    jq_disabled = _FakeJobQueue()
+    journal_bot.register_jobs(jq_disabled)  # type: ignore[arg-type]
+    assert DAILY_BRIEF_JOB_NAME not in jq_disabled.daily
+
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        daily_brief_time_utc=datetime.strptime("09:00", "%H:%M").time(),
+    )
+    jq_enabled = _FakeJobQueue()
+    journal_bot.register_jobs(jq_enabled)  # type: ignore[arg-type]
+    assert DAILY_BRIEF_JOB_NAME in jq_enabled.daily
+
+
 @pytest.mark.asyncio
 async def test_send_startup_message_notifies_all_configured_chats(
     journal_bot: JournalBot,
@@ -635,6 +693,109 @@ async def test_send_startup_message_continues_after_send_failure(
     assert delivered == [1, 3]
 
 
+@pytest.mark.asyncio
+async def test_send_daily_brief_with_historical_notes(
+    journal_bot: JournalBot,
+) -> None:
+    """Daily brief should send same-day previous-year notes as full content."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={4},
+    )
+    journal_bot._repository.get_same_day_previous_year_notes = AsyncMock(  # type: ignore[attr-defined]
+        return_value=[
+            (datetime(2024, 3, 16, tzinfo=UTC), "note 2024"),
+            (datetime(2025, 3, 16, tzinfo=UTC), "note 2025"),
+        ]
+    )
+    context = _context()
+
+    await journal_bot.send_daily_brief(context)  # type: ignore[arg-type]
+
+    assert context.bot.send_message.await_count >= 1  # type: ignore[attr-defined]
+    sent_payload = context.bot.send_message.await_args_list[0].args[1]  # type: ignore[attr-defined]
+    assert "2024-03-16" in sent_payload
+    assert "2025-03-16" in sent_payload
+    assert "note 2024" in sent_payload
+    assert "note 2025" in sent_payload
+
+
+@pytest.mark.asyncio
+async def test_send_daily_brief_without_historical_notes(
+    journal_bot: JournalBot,
+) -> None:
+    """Daily brief should explicitly notify when no same-day memories exist."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={4},
+    )
+    journal_bot._repository.get_same_day_previous_year_notes = AsyncMock(  # type: ignore[attr-defined]
+        return_value=[]
+    )
+    context = _context()
+
+    await journal_bot.send_daily_brief(context)  # type: ignore[arg-type]
+
+    context.bot.send_message.assert_awaited_once_with(4, NO_MEMORIES_MESSAGE)  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_send_daily_brief_continues_after_send_failure(
+    journal_bot: JournalBot,
+) -> None:
+    """Daily brief should continue with remaining users after one send failure."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1, 2, 3},
+    )
+    journal_bot._repository.get_same_day_previous_year_notes = AsyncMock(  # type: ignore[attr-defined]
+        return_value=[]
+    )
+
+    delivered: list[int] = []
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        assert text == NO_MEMORIES_MESSAGE
+        if chat_id == 2:
+            raise OSError("network")
+        delivered.append(chat_id)
+
+    context = _context()
+    context.bot.send_message = AsyncMock(side_effect=_send_message)
+
+    await journal_bot.send_daily_brief(context)  # type: ignore[arg-type]
+
+    assert delivered == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_todayinhistory_command_for_requester(
+    journal_bot: JournalBot,
+) -> None:
+    """Manual history command should reply to requesting user chat only."""
+    update = _private_update()
+    context = _context()
+    journal_bot._repository.get_same_day_previous_year_notes = AsyncMock(  # type: ignore[attr-defined]
+        return_value=[
+            (datetime(2024, 3, 16, tzinfo=UTC), "note 2024"),
+            (datetime(2025, 3, 16, tzinfo=UTC), "note 2025"),
+        ]
+    )
+
+    await journal_bot.todayinhistory_command(update, context)  # type: ignore[arg-type]
+
+    assert update.effective_message.reply_text.await_count >= 1
+    payload = update.effective_message.reply_text.await_args_list[0].args[0]
+    assert "2024-03-16" in payload
+    assert "2025-03-16" in payload
+    assert "note 2024" in payload
+    assert "note 2025" in payload
+    assert context.bot.send_message.await_count == 0  # type: ignore[attr-defined]
+
+
 def test_get_active_chats_resets_non_set(journal_bot: JournalBot) -> None:
     """Active chat accessor should normalize invalid bot_data values."""
     context = _context()
@@ -678,6 +839,7 @@ async def test_unauthorized_early_returns_cover_branches(
     await journal_bot.mood_command(update, context)
     await journal_bot.delete_command(update, context)
     await journal_bot.show_command(update, context)
+    await journal_bot.todayinhistory_command(update, context)
     await journal_bot.tags_command(update, context)
     await journal_bot.handle_journal_entry(update, context)
 

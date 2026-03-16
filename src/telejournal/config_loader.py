@@ -66,5 +66,9 @@ def load_env_config() -> dict[str, Any]:
     if secure_permissions:
         config["secure_file_permissions"] = secure_permissions
 
+    daily_brief_time_utc = os.getenv("DAILY_BRIEF_TIME_UTC", "").strip()
+    if daily_brief_time_utc:
+        config["daily_brief_time_utc"] = daily_brief_time_utc
+
     expanded = expand_env_vars(config)
     return cast(dict[str, Any], expanded)

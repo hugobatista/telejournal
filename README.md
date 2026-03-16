@@ -25,6 +25,7 @@ Captured content is appended to your daily note with timestamped entries and str
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
 - Tags and mood management with inline keyboard callbacks
+- Daily UTC "on this day" brief with full note content from previous years
 
 ## Usage
 
@@ -96,6 +97,7 @@ telejournal run \
   --vault-root /path/to/vault \
   --allowed-user-ids 123456,987654 \
   --message-timestamp-window-seconds 60 \
+  --daily-brief-time-utc 09:00 \
   --secure-file-permissions
 ```
 
@@ -111,6 +113,7 @@ After the bot is running, these commands are available in your private chat:
 - `/mood` Open mood picker
 - `/show` Show current effective day note
 - `/show YYYY-MM-DD` Show a specific day note
+- `/todayinhistory` Show same-day notes from previous years
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
 
@@ -145,6 +148,7 @@ TELEGRAM_ALLOWED_USER_IDS=123456,987654
 
 - `MESSAGE_TIMESTAMP_WINDOW_SECONDS` (default: `60`) - Messages within this window share the same timestamp
 - `SECURE_FILE_PERMISSIONS` (default: `true`) - Set restrictive permissions (0o700/0o600) on vault directories and files for security. Set to `false` only if you need broader file access.
+- `DAILY_BRIEF_TIME_UTC` (default: `09:00`) - Daily UTC time for historical same-day brief (`HH:MM` or `HH:MM:SS`). Set to `0` to disable.
 
 ## Configuration
 
@@ -174,6 +178,7 @@ allowed_user_ids:
 log_level: INFO
 message_timestamp_window_seconds: 60
 secure_file_permissions: true
+daily_brief_time_utc: "0"
 ```
 
 **Configuration Keys:**
@@ -184,6 +189,7 @@ secure_file_permissions: true
 - `log_level` (optional, default: `INFO`) - Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `message_timestamp_window_seconds` (optional, default: `60`) - Messages within this window share the same timestamp
 - `secure_file_permissions` (optional, default: `true`) - Set restrictive file permissions for security
+- `daily_brief_time_utc` (optional, default: `09:00`) - Daily UTC time for the historical same-day brief (`HH:MM` or `HH:MM:SS`), or `0` to disable
 
 **Environment Variable Expansion:**
 

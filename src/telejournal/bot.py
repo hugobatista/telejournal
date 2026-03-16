@@ -62,6 +62,8 @@ ALBUM_JOB_PREFIX = "album-flush"
 ALBUM_FLUSH_SECONDS = 2
 STARTUP_JOB_NAME = "startup-hello"
 STARTUP_MESSAGE = "Hello! Telejournal is starting."
+DAILY_BRIEF_JOB_NAME = "daily-brief"
+NO_MEMORIES_MESSAGE = "No memories today"
 
 TAG_CHOICES = ["family", "health", "love", "hobby", "other", "finance", "social"]
 MAX_TELEGRAM_TEXT_LEN = 4096
@@ -107,6 +109,30 @@ def _truncate_message(text: str, max_len: int = MAX_TELEGRAM_TEXT_LEN) -> str:
     if len(text) <= max_len:
         return text
     return f"{text[: max_len - 5]}\n..."
+
+
+def _chunk_text(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN) -> list[str]:
+    """Split long text into Telegram-sized chunks, preferring line boundaries."""
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > chunk_size:
+        split_at = remaining.rfind("\n", 0, chunk_size)
+        if split_at <= 0:
+            split_at = chunk_size
+
+        chunk = remaining[:split_at].rstrip()
+        if not chunk:
+            chunk = remaining[:chunk_size]
+            split_at = len(chunk)
+        chunks.append(chunk)
+        remaining = remaining[split_at:].lstrip("\n")
+
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 def _mood_keyboard() -> InlineKeyboardMarkup:
@@ -244,6 +270,7 @@ class JournalBot:
             "/mood  Open mood picker\n"
             "/show  Show current effective day note\n"
             "/show YYYY-MM-DD  Show a specific day note\n"
+            "/todayinhistory  Show same-day notes from previous years\n"
             "/delete  Delete last entry and show deleted content\n"
             "/delete day [YYYY-MM-DD]  Delete full day note\n"
             "/help"
@@ -1087,6 +1114,62 @@ class JournalBot:
                     chat_id,
                 )
 
+    async def _build_daily_brief_payloads(
+        self,
+        reference_dt: datetime,
+    ) -> list[str]:
+        """Build daily brief payloads for same-day notes in previous years."""
+        historical_notes = await self._repository.get_same_day_previous_year_notes(
+            reference_dt
+        )
+
+        if not historical_notes:
+            return [NO_MEMORIES_MESSAGE]
+
+        date_label = reference_dt.strftime("%m-%d")
+        sections = [f"📅 On this day ({date_label})"]
+        for note_dt, content in historical_notes:
+            sections.append(
+                f"\n\n==== {note_dt.strftime('%Y-%m-%d')} ====\n\n{content}"
+            )
+
+        full_message = "".join(sections)
+        return _chunk_text(full_message)
+
+    async def todayinhistory_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Send same-day historical notes from previous years to the requester."""
+        del context
+        if not self._is_private_and_authorized(update):
+            return
+        if not update.effective_message:
+            return
+
+        payloads = await self._build_daily_brief_payloads(datetime.now(UTC))
+        for payload in payloads:
+            await update.effective_message.reply_text(payload)
+
+    async def send_daily_brief(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Send same-day historical notes from previous years to all users."""
+        payloads = await self._build_daily_brief_payloads(datetime.now(UTC))
+
+        for chat_id in sorted(self._settings.allowed_user_ids):
+            for payload in payloads:
+                try:
+                    await context.bot.send_message(chat_id, payload)
+                except (OSError, TelegramError):
+                    LOGGER.exception(
+                        "Failed to send daily brief to chat_id=%s",
+                        chat_id,
+                    )
+                    break
+
     async def handle_error(
         self,
         update: object,
@@ -1130,6 +1213,9 @@ class JournalBot:
         application.add_handler(CommandHandler("mood", self.mood_command))
         application.add_handler(CommandHandler("delete", self.delete_command))
         application.add_handler(CommandHandler("show", self.show_command))
+        application.add_handler(
+            CommandHandler("todayinhistory", self.todayinhistory_command)
+        )
         application.add_handler(CommandHandler("help", self.help_command))
 
         application.add_handler(CallbackQueryHandler(self.callback_router))
@@ -1139,3 +1225,9 @@ class JournalBot:
         """Register periodic reminder jobs."""
         job_queue.run_once(self.send_startup_message, when=0, name=STARTUP_JOB_NAME)
         job_queue.run_repeating(self.check_mood_timers, interval=300, first=300)
+        if self._settings.daily_brief_time_utc is not None:
+            job_queue.run_daily(
+                self.send_daily_brief,
+                time=self._settings.daily_brief_time_utc,
+                name=DAILY_BRIEF_JOB_NAME,
+            )
