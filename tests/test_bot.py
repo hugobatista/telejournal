@@ -19,6 +19,7 @@ from telejournal.bot import (
     HISTORY_CALLBACK_PREFIX,
     LAST_PROMPT_AT_KEY,
     LAST_WINDOW_AT_KEY,
+    MAX_TRACKED_REPLY_SOURCES,
     MOOD_CALLBACK_PREFIX,
     NO_MEMORIES_MESSAGE,
     STARTUP_JOB_NAME,
@@ -978,6 +979,89 @@ async def test_history_callback_raw_and_rendered_modes(
     assert rendered_context.bot.send_photo.await_count == 1  # type: ignore[attr-defined]
 
 
+@pytest.mark.asyncio
+async def test_reply_quote_adds_source_note_link_when_history_message_known(
+    journal_bot: JournalBot,
+) -> None:
+    """Reply quotes should include a source-note link for tracked history messages."""
+    source_note_dt = datetime(2024, 3, 16, tzinfo=UTC)
+    context = _context()
+    context.chat_data["override_date"] = datetime(2026, 3, 17, tzinfo=UTC)
+    journal_bot._reply_source_notes = {1: {55: source_note_dt}}  # type: ignore[attr-defined]
+
+    reply_to_message = SimpleNamespace(
+        message_id=55,
+        text="On this day in 2024 you wrote...",
+        text_markdown_urled="On this day in 2024 you wrote...",
+        caption=None,
+        from_user=SimpleNamespace(id=999, is_bot=True),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(
+        text="my new thought",
+        reply_to_message=reply_to_message,
+    )
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    entry = journal_bot._repository.append_entry.await_args.args[1]  # type: ignore
+    assert "On this day in 2024 you wrote..." in entry
+    assert "[Source note](../2024/2024-03-16.md)" in entry
+
+
+def test_track_reply_source_message_trims_old_entries(journal_bot: JournalBot) -> None:
+    """Reply-source map should trim oldest message IDs once max size is exceeded."""
+    chat_id = 1
+    source_dt = datetime(2024, 3, 16, tzinfo=UTC)
+
+    for message_id in range(MAX_TRACKED_REPLY_SOURCES + 1):
+        journal_bot._track_reply_source_message(  # type: ignore[attr-defined]
+            chat_id,
+            SimpleNamespace(message_id=message_id),
+            source_dt,
+        )
+
+    tracked = journal_bot._reply_source_notes[chat_id]  # type: ignore[attr-defined]
+    assert len(tracked) == 1000
+    assert min(tracked) == 1001
+    assert max(tracked) == MAX_TRACKED_REPLY_SOURCES
+
+
+def test_extract_reply_quote_with_source_link_without_quote_text(
+    journal_bot: JournalBot,
+) -> None:
+    """When quoted content is empty, source link should still be returned."""
+    source_dt = datetime(2024, 3, 16, tzinfo=UTC)
+    note_dt = datetime(2026, 3, 17, tzinfo=UTC)
+    journal_bot._reply_source_notes = {1: {99: source_dt}}  # type: ignore[attr-defined]
+
+    message = SimpleNamespace(
+        reply_to_message=SimpleNamespace(
+            message_id=99,
+            text=None,
+            caption=None,
+            from_user=SimpleNamespace(id=999, is_bot=True),
+            photo=None,
+            voice=None,
+            video=None,
+            video_note=None,
+            location=None,
+        ),
+        from_user=SimpleNamespace(id=1, is_bot=False),
+    )
+
+    quote = journal_bot._extract_reply_quote_with_source_link(  # type: ignore[attr-defined]
+        message,
+        1,
+        note_dt,
+    )
+    assert quote == "[Source note](../2024/2024-03-16.md)"
+
+
 def test_get_active_chats_resets_non_set(journal_bot: JournalBot) -> None:
     """Active chat accessor should normalize invalid bot_data values."""
     context = _context()
@@ -1045,10 +1129,17 @@ async def test_photo_and_flush_defensive_branches(
         context,
         datetime.now(UTC),
         True,
+        1,
     )
 
     update_no_photo = _private_update(text=None, photo=[])
-    await journal_bot._handle_photo(update_no_photo, context, datetime.now(UTC), True)
+    await journal_bot._handle_photo(
+        update_no_photo,
+        context,
+        datetime.now(UTC),
+        True,
+        1,
+    )
 
     update_no_voice = _private_update(text=None, voice=None)
     assert not await journal_bot._handle_voice(
@@ -1056,6 +1147,7 @@ async def test_photo_and_flush_defensive_branches(
         context,
         datetime.now(UTC),
         True,
+        1,
     )
 
     update_no_video = _private_update(text=None, video=None)
@@ -1064,6 +1156,7 @@ async def test_photo_and_flush_defensive_branches(
         context,
         datetime.now(UTC),
         True,
+        1,
     )
 
     update_no_video_note = _private_update(text=None, video_note=None)
@@ -1072,6 +1165,7 @@ async def test_photo_and_flush_defensive_branches(
         context,
         datetime.now(UTC),
         True,
+        1,
     )
 
     class _Photo:
@@ -1085,7 +1179,13 @@ async def test_photo_and_flush_defensive_branches(
         photo=[_Photo()],
         media_group_id="group-x",
     )
-    await journal_bot._handle_photo(album_update, context, datetime.now(UTC), True)
+    await journal_bot._handle_photo(
+        album_update,
+        context,
+        datetime.now(UTC),
+        True,
+        1,
+    )
 
     await journal_bot.flush_album_entry(_context())
 

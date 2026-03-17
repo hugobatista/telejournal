@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import posixpath
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -70,6 +71,7 @@ STARTUP_JOB_NAME = "startup-hello"
 STARTUP_MESSAGE = "Hello! Telejournal is starting."
 DAILY_BRIEF_JOB_NAME = "daily-brief"
 NO_MEMORIES_MESSAGE = "No memories today"
+MAX_TRACKED_REPLY_SOURCES = 2000
 
 TAG_CHOICES = ["family", "health", "love", "hobby", "other", "finance", "social"]
 MAX_TELEGRAM_TEXT_LEN = 4096
@@ -228,6 +230,66 @@ class JournalBot:
             settings.vault_root,
             secure_permissions=settings.secure_file_permissions,
         )
+        self._reply_source_notes: dict[int, dict[int, datetime]] = {}
+
+    @staticmethod
+    def _note_relpath(note_dt: datetime) -> str:
+        """Return normalized note path as ``YYYY/YYYY-MM-DD.md``."""
+        return f"{note_dt.year}/{note_dt.strftime('%Y-%m-%d')}.md"
+
+    @classmethod
+    def _build_source_note_link(
+        cls, source_note_dt: datetime, note_dt: datetime
+    ) -> str:
+        """Build markdown link from current note directory to source note path."""
+        source_relpath = cls._note_relpath(source_note_dt)
+        current_dir = str(note_dt.year)
+        relative_path = posixpath.relpath(source_relpath, start=current_dir)
+        return f"[Source note]({relative_path})"
+
+    def _track_reply_source_message(
+        self,
+        chat_id: int,
+        sent_message: Any,
+        source_note_dt: datetime,
+    ) -> None:
+        """Remember which Telegram message ids correspond to historical notes."""
+        message_id = getattr(sent_message, "message_id", None)
+        if not isinstance(message_id, int):
+            return
+
+        tracked = self._reply_source_notes.setdefault(chat_id, {})
+        tracked[message_id] = source_note_dt
+
+        if len(tracked) <= MAX_TRACKED_REPLY_SOURCES:
+            return
+
+        for stale_message_id in sorted(tracked)[: len(tracked) - 1000]:
+            tracked.pop(stale_message_id, None)
+
+    def _extract_reply_quote_with_source_link(
+        self,
+        message: Any,
+        chat_id: int,
+        note_dt: datetime,
+    ) -> str | None:
+        """Extract reply quote and append source-note link when available."""
+        quote = extract_reply_quote(message)
+
+        reply_to = getattr(message, "reply_to_message", None)
+        reply_message_id_raw = getattr(reply_to, "message_id", None)
+        if not isinstance(reply_message_id_raw, int):
+            return quote
+        reply_message_id: int = reply_message_id_raw
+
+        source_note_dt = self._reply_source_notes.get(chat_id, {}).get(reply_message_id)
+        if source_note_dt is None:
+            return quote
+
+        source_link = self._build_source_note_link(source_note_dt, note_dt)
+        if quote:
+            return f"{quote}\n\n{source_link}"
+        return source_link
 
     @staticmethod
     def _chat_data(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
@@ -289,18 +351,22 @@ class JournalBot:
         chat_id: int,
         bot: Any,
         text: str,
+        source_note_dt: datetime | None = None,
     ) -> None:
         """Send text using Telegram-safe chunk sizes."""
         if not text or not text.strip():
             return
         for payload in _chunk_text(text):
-            await bot.send_message(chat_id, payload)
+            sent = await bot.send_message(chat_id, payload)
+            if source_note_dt is not None:
+                self._track_reply_source_message(chat_id, sent, source_note_dt)
 
     async def _send_attachment(
         self,
         chat_id: int,
         bot: Any,
         attachment_rel: str,
+        source_note_dt: datetime | None = None,
     ) -> None:
         """Send one attachment based on file extension with graceful fallback."""
         attachment_path = self._resolve_attachment_path(attachment_rel)
@@ -315,13 +381,16 @@ class JournalBot:
         try:
             with attachment_path.open("rb") as attachment_file:
                 if suffix in PHOTO_EXTENSIONS:
-                    await bot.send_photo(chat_id, attachment_file)
+                    sent = await bot.send_photo(chat_id, attachment_file)
                 elif suffix in VIDEO_EXTENSIONS:
-                    await bot.send_video(chat_id, attachment_file)
+                    sent = await bot.send_video(chat_id, attachment_file)
                 elif suffix in VOICE_EXTENSIONS:
-                    await bot.send_voice(chat_id, attachment_file)
+                    sent = await bot.send_voice(chat_id, attachment_file)
                 else:
-                    await bot.send_document(chat_id, attachment_file)
+                    sent = await bot.send_document(chat_id, attachment_file)
+
+                if source_note_dt is not None:
+                    self._track_reply_source_message(chat_id, sent, source_note_dt)
         except (OSError, TelegramError):
             LOGGER.exception("Failed to send attachment %s", attachment_rel)
             await bot.send_message(
@@ -334,32 +403,55 @@ class JournalBot:
         chat_id: int,
         bot: Any,
         payload: NoteRenderPayload,
+        source_note_dt: datetime | None = None,
     ) -> None:
         """Send parsed note chunks as text and media in source order."""
         for chunk in payload.chunks:
             if isinstance(chunk, TextChunk):
-                await self._send_chunked_text(chat_id, bot, chunk.text)
+                await self._send_chunked_text(
+                    chat_id,
+                    bot,
+                    chunk.text,
+                    source_note_dt=source_note_dt,
+                )
             elif isinstance(chunk, AttachmentChunk):
-                await self._send_attachment(chat_id, bot, chunk.attachment_rel)
+                await self._send_attachment(
+                    chat_id,
+                    bot,
+                    chunk.attachment_rel,
+                    source_note_dt=source_note_dt,
+                )
 
     async def _send_note_content(
         self,
         chat_id: int,
         bot: Any,
         note_content: str,
+        source_note_dt: datetime | None = None,
     ) -> None:
         """Parse note content and send it to a Telegram chat."""
         payload = parse_note_render_payload(note_content)
-        await self._send_note_payload(chat_id, bot, payload)
+        await self._send_note_payload(
+            chat_id,
+            bot,
+            payload,
+            source_note_dt=source_note_dt,
+        )
 
     async def _send_note_text_only(
         self,
         chat_id: int,
         bot: Any,
         note_content: str,
+        source_note_dt: datetime | None = None,
     ) -> None:
         """Send note content exactly as text, preserving embed links."""
-        await self._send_chunked_text(chat_id, bot, note_content)
+        await self._send_chunked_text(
+            chat_id,
+            bot,
+            note_content,
+            source_note_dt=source_note_dt,
+        )
 
     async def _send_historical_notes_for_chat(
         self,
@@ -380,14 +472,25 @@ class JournalBot:
         date_label = reference_dt.strftime("%m-%d")
         await bot.send_message(chat_id, f"📅 On this day ({date_label})")
         for note_dt, content in historical_notes:
-            await bot.send_message(
+            sent = await bot.send_message(
                 chat_id,
                 f"==== {note_dt.strftime('%Y-%m-%d')} ====",
             )
+            self._track_reply_source_message(chat_id, sent, note_dt)
             if render_mode == "raw":
-                await self._send_note_text_only(chat_id, bot, content)
+                await self._send_note_text_only(
+                    chat_id,
+                    bot,
+                    content,
+                    source_note_dt=note_dt,
+                )
             else:
-                await self._send_note_content(chat_id, bot, content)
+                await self._send_note_content(
+                    chat_id,
+                    bot,
+                    content,
+                    source_note_dt=note_dt,
+                )
 
     async def _send_history_brief_prompt(
         self,
@@ -709,6 +812,7 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
         include_timestamp: bool,
+        chat_id: int,
     ) -> bool:
         """Persist a photo and append embed entry in note."""
         message = update.effective_message
@@ -728,7 +832,11 @@ class JournalBot:
             # Extract quote only once per album (from first message)
             quote = None
             if media_group_id not in albums:
-                quote = extract_reply_quote(message)
+                quote = self._extract_reply_quote_with_source_link(
+                    message,
+                    chat_id,
+                    note_dt,
+                )
 
             album_state = albums.setdefault(
                 media_group_id,
@@ -745,9 +853,6 @@ class JournalBot:
                 album_state["caption"] = caption
             album_state.setdefault("images", []).append(f"![[{attachment_rel}]]")
 
-            chat_id = self._chat_id(update)
-            if chat_id is None:
-                return False
             job_name = f"{ALBUM_JOB_PREFIX}:{chat_id}:{media_group_id}"
             if context.job_queue is not None:
                 if not context.job_queue.get_jobs_by_name(job_name):
@@ -761,7 +866,11 @@ class JournalBot:
 
         heading = format_photo_entry(caption, attachment_rel, "Photo")
 
-        quote = extract_reply_quote(message)
+        quote = self._extract_reply_quote_with_source_link(
+            message,
+            chat_id,
+            note_dt,
+        )
         if quote:
             heading = format_with_quote(quote, heading)
 
@@ -835,13 +944,18 @@ class JournalBot:
         latitude: float,
         longitude: float,
         include_timestamp: bool,
+        chat_id: int,
     ) -> None:
         """Persist a location message as a markdown journal line."""
         body = format_location_entry(latitude, longitude)
 
         message = update.effective_message
         if message:
-            quote = extract_reply_quote(message)
+            quote = self._extract_reply_quote_with_source_link(
+                message,
+                chat_id,
+                note_dt,
+            )
             if quote:
                 body = format_with_quote(quote, body)
 
@@ -887,6 +1001,7 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
         include_timestamp: bool,
+        chat_id: int,
     ) -> bool:
         """Persist a voice recording and append embed entry in note."""
         message = update.effective_message
@@ -898,7 +1013,11 @@ class JournalBot:
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Voice recording")
 
-        quote = extract_reply_quote(message)
+        quote = self._extract_reply_quote_with_source_link(
+            message,
+            chat_id,
+            note_dt,
+        )
         if quote:
             body = format_with_quote(quote, body)
 
@@ -919,6 +1038,7 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
         include_timestamp: bool,
+        chat_id: int,
     ) -> bool:
         """Persist a video message and append embed entry in note."""
         message = update.effective_message
@@ -930,7 +1050,11 @@ class JournalBot:
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Video message")
 
-        quote = extract_reply_quote(message)
+        quote = self._extract_reply_quote_with_source_link(
+            message,
+            chat_id,
+            note_dt,
+        )
         if quote:
             body = format_with_quote(quote, body)
 
@@ -951,6 +1075,7 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
         note_dt: datetime,
         include_timestamp: bool,
+        chat_id: int,
     ) -> bool:
         """Persist a video note (circular video) and append embed entry in note."""
         message = update.effective_message
@@ -964,7 +1089,11 @@ class JournalBot:
         caption = render_message_markdown(message)
         body = format_photo_entry(caption, attachment_rel, "Video note")
 
-        quote = extract_reply_quote(message)
+        quote = self._extract_reply_quote_with_source_link(
+            message,
+            chat_id,
+            note_dt,
+        )
         if quote:
             body = format_with_quote(quote, body)
 
@@ -1045,6 +1174,7 @@ class JournalBot:
                     context,
                     note_dt,
                     include_timestamp,
+                    chat_id,
                 )
             elif message.voice:
                 wrote_entry = await self._handle_voice(
@@ -1052,6 +1182,7 @@ class JournalBot:
                     context,
                     note_dt,
                     include_timestamp,
+                    chat_id,
                 )
             elif message.video:
                 wrote_entry = await self._handle_video(
@@ -1059,6 +1190,7 @@ class JournalBot:
                     context,
                     note_dt,
                     include_timestamp,
+                    chat_id,
                 )
             elif message.video_note:
                 wrote_entry = await self._handle_video_note(
@@ -1066,6 +1198,7 @@ class JournalBot:
                     context,
                     note_dt,
                     include_timestamp,
+                    chat_id,
                 )
             elif message.location:
                 await self._handle_location(
@@ -1075,11 +1208,16 @@ class JournalBot:
                     message.location.latitude,
                     message.location.longitude,
                     include_timestamp,
+                    chat_id,
                 )
                 wrote_entry = True
             elif message.text:
                 text = render_message_markdown(message)
-                quote = extract_reply_quote(message)
+                quote = self._extract_reply_quote_with_source_link(
+                    message,
+                    chat_id,
+                    note_dt,
+                )
                 await self._handle_text(
                     text, context, note_dt, include_timestamp, quote
                 )
