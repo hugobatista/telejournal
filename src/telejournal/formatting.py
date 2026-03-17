@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -14,6 +16,59 @@ MOOD_LABELS = {
     4: "🙂",
     5: "😊",
 }
+
+_EMBED_RE = re.compile(r"!\[\[(?P<target>[^\]]+)\]\]")
+
+
+@dataclass(frozen=True)
+class TextChunk:
+    """Represents a plain text section to send to Telegram."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class AttachmentChunk:
+    """Represents a file embed path extracted from note markdown."""
+
+    attachment_rel: str
+
+
+@dataclass(frozen=True)
+class NoteRenderPayload:
+    """Ordered collection of text and attachment chunks."""
+
+    chunks: list[TextChunk | AttachmentChunk]
+
+
+def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
+    """Parse note content into ordered text and attachment chunks.
+
+    Obsidian-style embeds like ``![[2026/attachments/file.jpg]]`` are extracted as
+    attachment chunks while preserving surrounding text in separate chunks.
+    """
+    chunks: list[TextChunk | AttachmentChunk] = []
+    cursor = 0
+
+    for match in _EMBED_RE.finditer(note_content):
+        before = note_content[cursor : match.start()]
+        if before:
+            chunks.append(TextChunk(text=before))
+
+        target = match.group("target").strip()
+        # Keep first path component before Obsidian alias/heading fragments.
+        attachment_rel = target.split("|", maxsplit=1)[0]
+        attachment_rel = attachment_rel.split("#", maxsplit=1)[0].strip()
+        if attachment_rel:
+            chunks.append(AttachmentChunk(attachment_rel=attachment_rel))
+
+        cursor = match.end()
+
+    tail = note_content[cursor:]
+    if tail:
+        chunks.append(TextChunk(text=tail))
+
+    return NoteRenderPayload(chunks=chunks)
 
 
 def extract_mood_value(raw_mood: Any) -> int | None:

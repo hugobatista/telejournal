@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, time
 from pathlib import Path
 
 import pytest
@@ -97,18 +98,18 @@ def test_load_settings_defaults_window_seconds(
     assert settings.message_timestamp_window_seconds == 60
 
 
-def test_load_settings_daily_brief_defaults_disabled(
+def test_load_settings_daily_brief_defaults_to_morning_utc(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Daily brief should default to disabled when not configured."""
+    """Daily brief should default to 09:00 UTC when not configured."""
     monkeypatch.setenv("TELEGRAM_TOKEN", "token")
     monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
     monkeypatch.delenv("DAILY_BRIEF_TIME_UTC", raising=False)
 
     settings = load_settings()
-    assert settings.daily_brief_time_utc is None
+    assert settings.daily_brief_time_utc == time(9, 0, tzinfo=UTC)
 
 
 def test_load_settings_daily_brief_explicit_disabled(

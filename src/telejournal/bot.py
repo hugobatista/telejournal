@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -22,7 +23,10 @@ from telegram.ext import (
 
 from telejournal.config import Settings
 from telejournal.formatting import (
+    AttachmentChunk,
     MOOD_LABELS,
+    NoteRenderPayload,
+    TextChunk,
     extract_mood_value,
     extract_reply_quote,
     format_album_entry,
@@ -33,6 +37,7 @@ from telejournal.formatting import (
     format_photo_entry,
     format_text_entry,
     format_with_quote,
+    parse_note_render_payload,
     render_message_markdown,
 )
 from telejournal.logic import (
@@ -58,6 +63,7 @@ LAST_WINDOW_NOTE_KEY = "last_window_note"
 MOOD_CALLBACK_PREFIX = "mood:"
 TAG_CALLBACK_PREFIX = "tag:"
 DELETE_CALLBACK_PREFIX = "delete:"
+HISTORY_CALLBACK_PREFIX = "history:"
 ALBUM_JOB_PREFIX = "album-flush"
 ALBUM_FLUSH_SECONDS = 2
 STARTUP_JOB_NAME = "startup-hello"
@@ -67,6 +73,9 @@ NO_MEMORIES_MESSAGE = "No memories today"
 
 TAG_CHOICES = ["family", "health", "love", "hobby", "other", "finance", "social"]
 MAX_TELEGRAM_TEXT_LEN = 4096
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
+VOICE_EXTENSIONS = {".ogg", ".opus"}
 
 
 def _parse_tags_from_args(args: list[str]) -> set[str]:
@@ -189,6 +198,26 @@ def _delete_confirmation_keyboard(action: str, note_date: str) -> InlineKeyboard
     )
 
 
+def _history_render_keyboard(action: str, date_str: str) -> InlineKeyboardMarkup:
+    """Build inline keyboard for choosing note-only vs rendered output."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Notes only",
+                    callback_data=(f"{HISTORY_CALLBACK_PREFIX}{action}:raw:{date_str}"),
+                ),
+                InlineKeyboardButton(
+                    "Rendered",
+                    callback_data=(
+                        f"{HISTORY_CALLBACK_PREFIX}{action}:rendered:{date_str}"
+                    ),
+                ),
+            ]
+        ]
+    )
+
+
 class JournalBot:
     """Encapsulates handlers and shared state for journal operations."""
 
@@ -244,6 +273,149 @@ class JournalBot:
         if update.effective_message:
             await update.effective_message.reply_text(message)
 
+    def _resolve_attachment_path(self, attachment_rel: str) -> Path | None:
+        """Resolve a relative attachment path under vault root safely."""
+        candidate = (self._repository.vault_root / attachment_rel).resolve()
+        vault_root = self._repository.vault_root.resolve()
+
+        if candidate != vault_root and vault_root not in candidate.parents:
+            return None
+        if not candidate.exists() or not candidate.is_file():
+            return None
+        return candidate
+
+    async def _send_chunked_text(
+        self,
+        chat_id: int,
+        bot: Any,
+        text: str,
+    ) -> None:
+        """Send text using Telegram-safe chunk sizes."""
+        if not text or not text.strip():
+            return
+        for payload in _chunk_text(text):
+            await bot.send_message(chat_id, payload)
+
+    async def _send_attachment(
+        self,
+        chat_id: int,
+        bot: Any,
+        attachment_rel: str,
+    ) -> None:
+        """Send one attachment based on file extension with graceful fallback."""
+        attachment_path = self._resolve_attachment_path(attachment_rel)
+        if attachment_path is None:
+            await bot.send_message(
+                chat_id,
+                f"⚠️ Attachment not found: {attachment_rel}",
+            )
+            return
+
+        suffix = attachment_path.suffix.lower()
+        try:
+            with attachment_path.open("rb") as attachment_file:
+                if suffix in PHOTO_EXTENSIONS:
+                    await bot.send_photo(chat_id, attachment_file)
+                elif suffix in VIDEO_EXTENSIONS:
+                    await bot.send_video(chat_id, attachment_file)
+                elif suffix in VOICE_EXTENSIONS:
+                    await bot.send_voice(chat_id, attachment_file)
+                else:
+                    await bot.send_document(chat_id, attachment_file)
+        except (OSError, TelegramError):
+            LOGGER.exception("Failed to send attachment %s", attachment_rel)
+            await bot.send_message(
+                chat_id,
+                f"⚠️ Failed to send attachment: {attachment_rel}",
+            )
+
+    async def _send_note_payload(
+        self,
+        chat_id: int,
+        bot: Any,
+        payload: NoteRenderPayload,
+    ) -> None:
+        """Send parsed note chunks as text and media in source order."""
+        for chunk in payload.chunks:
+            if isinstance(chunk, TextChunk):
+                await self._send_chunked_text(chat_id, bot, chunk.text)
+            elif isinstance(chunk, AttachmentChunk):
+                await self._send_attachment(chat_id, bot, chunk.attachment_rel)
+
+    async def _send_note_content(
+        self,
+        chat_id: int,
+        bot: Any,
+        note_content: str,
+    ) -> None:
+        """Parse note content and send it to a Telegram chat."""
+        payload = parse_note_render_payload(note_content)
+        await self._send_note_payload(chat_id, bot, payload)
+
+    async def _send_note_text_only(
+        self,
+        chat_id: int,
+        bot: Any,
+        note_content: str,
+    ) -> None:
+        """Send note content exactly as text, preserving embed links."""
+        await self._send_chunked_text(chat_id, bot, note_content)
+
+    async def _send_historical_notes_for_chat(
+        self,
+        chat_id: int,
+        bot: Any,
+        reference_dt: datetime,
+        render_mode: str,
+    ) -> None:
+        """Send historical notes in selected mode for one chat."""
+        historical_notes = await self._repository.get_same_day_previous_year_notes(
+            reference_dt
+        )
+
+        if not historical_notes:
+            await bot.send_message(chat_id, NO_MEMORIES_MESSAGE)
+            return
+
+        date_label = reference_dt.strftime("%m-%d")
+        await bot.send_message(chat_id, f"📅 On this day ({date_label})")
+        for note_dt, content in historical_notes:
+            await bot.send_message(
+                chat_id,
+                f"==== {note_dt.strftime('%Y-%m-%d')} ====",
+            )
+            if render_mode == "raw":
+                await self._send_note_text_only(chat_id, bot, content)
+            else:
+                await self._send_note_content(chat_id, bot, content)
+
+    async def _send_history_brief_prompt(
+        self,
+        chat_id: int,
+        bot: Any,
+        reference_dt: datetime,
+    ) -> None:
+        """Send brief summary of available years and ask for output format."""
+        historical_notes = await self._repository.get_same_day_previous_year_notes(
+            reference_dt
+        )
+
+        if not historical_notes:
+            await bot.send_message(chat_id, NO_MEMORIES_MESSAGE)
+            return
+
+        years = ", ".join(str(note_dt.year) for note_dt, _ in historical_notes)
+        date_str = reference_dt.strftime("%Y-%m-%d")
+        date_label = reference_dt.strftime("%m-%d")
+        await bot.send_message(
+            chat_id,
+            (
+                f"📅 On this day ({date_label}) I found notes for: {years}.\n"
+                "How do you want to view them?"
+            ),
+            reply_markup=_history_render_keyboard("history", date_str),
+        )
+
     async def help_command(
         self,
         update: Update,
@@ -255,7 +427,7 @@ class JournalBot:
             return
 
         help_text = (
-            "📝 Journal Bot Usage\n\n"
+            "📝 Telejournal Bot Usage\n\n"
             "• Every private message is journaled\n"
             "• Photos are embedded from attachments/\n"
             "• Voice recordings are embedded from attachments/\n"
@@ -423,8 +595,13 @@ class JournalBot:
             )
             return
 
-        rendered = _truncate_message(note_content)
-        await update.effective_message.reply_text(rendered)
+        await update.effective_message.reply_text(
+            f"How do you want to view note {note_dt.strftime('%Y-%m-%d')}?",
+            reply_markup=_history_render_keyboard(
+                "show",
+                note_dt.strftime("%Y-%m-%d"),
+            ),
+        )
 
     async def mood_command(
         self,
@@ -948,6 +1125,50 @@ class JournalBot:
             now,
         )
 
+        if query.data.startswith(HISTORY_CALLBACK_PREFIX):
+            parts = query.data.split(":")
+            if len(parts) != 4:
+                return
+
+            _, action, render_mode, raw_date = parts
+            if action not in {"show", "history"}:
+                return
+            if render_mode not in {"raw", "rendered"}:
+                return
+
+            try:
+                target_dt = _parse_iso_date(raw_date)
+            except ValueError:
+                return
+
+            chat_id = self._chat_id(update)
+            if chat_id is None:
+                return
+
+            if action == "show":
+                note_content = await self._repository.get_note_content(target_dt)
+                if note_content is None:
+                    await query.edit_message_text(
+                        f"No note found for {target_dt.strftime('%Y-%m-%d')}."
+                    )
+                    return
+
+                await query.edit_message_text("Sending note...")
+                if render_mode == "raw":
+                    await self._send_note_text_only(chat_id, context.bot, note_content)
+                else:
+                    await self._send_note_content(chat_id, context.bot, note_content)
+                return
+
+            await query.edit_message_text("Sending memories...")
+            await self._send_historical_notes_for_chat(
+                chat_id,
+                context.bot,
+                target_dt,
+                render_mode,
+            )
+            return
+
         if query.data.startswith(MOOD_CALLBACK_PREFIX):
             raw_value = query.data.removeprefix(MOOD_CALLBACK_PREFIX)
             try:
@@ -1114,27 +1335,14 @@ class JournalBot:
                     chat_id,
                 )
 
-    async def _build_daily_brief_payloads(
+    async def _send_daily_brief_for_chat(
         self,
+        chat_id: int,
+        bot: Any,
         reference_dt: datetime,
-    ) -> list[str]:
-        """Build daily brief payloads for same-day notes in previous years."""
-        historical_notes = await self._repository.get_same_day_previous_year_notes(
-            reference_dt
-        )
-
-        if not historical_notes:
-            return [NO_MEMORIES_MESSAGE]
-
-        date_label = reference_dt.strftime("%m-%d")
-        sections = [f"📅 On this day ({date_label})"]
-        for note_dt, content in historical_notes:
-            sections.append(
-                f"\n\n==== {note_dt.strftime('%Y-%m-%d')} ====\n\n{content}"
-            )
-
-        full_message = "".join(sections)
-        return _chunk_text(full_message)
+    ) -> None:
+        """Send daily brief summary and prompt for render mode selection."""
+        await self._send_history_brief_prompt(chat_id, bot, reference_dt)
 
     async def todayinhistory_command(
         self,
@@ -1142,33 +1350,33 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Send same-day historical notes from previous years to the requester."""
-        del context
         if not self._is_private_and_authorized(update):
             return
         if not update.effective_message:
             return
 
-        payloads = await self._build_daily_brief_payloads(datetime.now(UTC))
-        for payload in payloads:
-            await update.effective_message.reply_text(payload)
+        chat_id = self._chat_id(update)
+        if chat_id is None:
+            return
+        await self._send_history_brief_prompt(chat_id, context.bot, datetime.now(UTC))
 
     async def send_daily_brief(
         self,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Send same-day historical notes from previous years to all users."""
-        payloads = await self._build_daily_brief_payloads(datetime.now(UTC))
-
         for chat_id in sorted(self._settings.allowed_user_ids):
-            for payload in payloads:
-                try:
-                    await context.bot.send_message(chat_id, payload)
-                except (OSError, TelegramError):
-                    LOGGER.exception(
-                        "Failed to send daily brief to chat_id=%s",
-                        chat_id,
-                    )
-                    break
+            try:
+                await self._send_daily_brief_for_chat(
+                    chat_id,
+                    context.bot,
+                    datetime.now(UTC),
+                )
+            except (OSError, TelegramError):
+                LOGGER.exception(
+                    "Failed to send daily brief to chat_id=%s",
+                    chat_id,
+                )
 
     async def handle_error(
         self,

@@ -25,7 +25,8 @@ Captured content is appended to your daily note with timestamped entries and str
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
 - Tags and mood management with inline keyboard callbacks
-- Daily UTC "on this day" brief with full note content from previous years
+- `/show` asks whether to show note text only or rendered (text + embedded attachments)
+- Daily UTC "on this day" brief sends a years summary and asks whether to show history as notes only or rendered
 
 ## Usage
 
@@ -111,9 +112,9 @@ After the bot is running, these commands are available in your private chat:
 - `/tags` Show tag buttons
 - `/tags work kids` Add/select one or more tags
 - `/mood` Open mood picker
-- `/show` Show current effective day note
-- `/show YYYY-MM-DD` Show a specific day note
-- `/todayinhistory` Show same-day notes from previous years
+- `/show` Show current effective day note and choose notes only or rendered output
+- `/show YYYY-MM-DD` Show a specific day note and choose notes only or rendered output
+- `/todayinhistory` Show same-day note years and choose notes only or rendered output
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
 

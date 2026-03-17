@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from telejournal.formatting import (
+    AttachmentChunk,
     MOOD_LABELS,
+    NoteRenderPayload,
+    TextChunk,
     extract_reply_quote,
     format_mood_change_text,
     format_mood_saved_text,
@@ -18,6 +21,7 @@ from telejournal.formatting import (
     format_timestamp_marker,
     format_text_entry,
     render_message_markdown,
+    parse_note_render_payload,
 )
 
 
@@ -216,6 +220,41 @@ def test_format_with_quote_multiline() -> None:
     """Multi-line quotes should prefix each line with >."""
     result = format_with_quote("line 1\nline 2\nline 3", "reply")
     assert result == "> line 1\n> line 2\n> line 3\n\nreply"
+
+
+def test_parse_note_render_payload_without_embeds() -> None:
+    """Parser should keep plain notes as one text chunk."""
+    payload = parse_note_render_payload("hello\nworld")
+    assert payload == NoteRenderPayload(chunks=[TextChunk(text="hello\nworld")])
+
+
+def test_parse_note_render_payload_with_embeds() -> None:
+    """Parser should split text and embeds while preserving order."""
+    payload = parse_note_render_payload(
+        "head\n![[2026/attachments/a.jpg]]\nbody\n![[2026/attachments/b.ogg]]"
+    )
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="head\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/a.jpg"),
+            TextChunk(text="\nbody\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/b.ogg"),
+        ]
+    )
+
+
+def test_parse_note_render_payload_strips_alias_and_heading() -> None:
+    """Parser should normalize embed path by removing alias/heading suffixes."""
+    payload = parse_note_render_payload(
+        "![[2026/attachments/a.jpg|preview]]\n![[2026/attachments/b.mp4#t=00:03]]"
+    )
+    assert payload == NoteRenderPayload(
+        chunks=[
+            AttachmentChunk(attachment_rel="2026/attachments/a.jpg"),
+            TextChunk(text="\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/b.mp4"),
+        ]
+    )
 
 
 def test_format_with_quote_empty_lines() -> None:
