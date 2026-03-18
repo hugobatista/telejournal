@@ -14,6 +14,9 @@ from telegram.constants import ChatType
 from telejournal.bot import (
     ACTIVE_CHATS_KEY,
     ALBUMS_KEY,
+    CONFIG_CALLBACK_PREFIX,
+    CONFIG_FLOW_KEY,
+    CONFIG_PENDING_KEY,
     DAILY_BRIEF_JOB_NAME,
     DELETE_CALLBACK_PREFIX,
     HISTORY_CALLBACK_PREFIX,
@@ -32,7 +35,7 @@ from telejournal.bot import (
     _truncate_message,
 )
 from telejournal.config import Settings
-from telejournal.formatting import extract_mood_value
+from telejournal.formatting import extract_mood_value, parse_note_render_payload
 
 
 class _FakeJobQueue:
@@ -72,7 +75,9 @@ class _FakeJobQueue:
 @pytest.fixture
 def journal_bot(tmp_path: Path) -> JournalBot:
     """Create bot with fake repository methods for handler testing."""
-    bot = JournalBot(Settings("token", tmp_path, {1}))
+    bot = JournalBot(
+        Settings("token", tmp_path, {1}, config_path=tmp_path / "config.yaml")
+    )
     bot._repository = SimpleNamespace(  # type: ignore[assignment]
         vault_root=tmp_path,
         append_entry=AsyncMock(),
@@ -90,6 +95,7 @@ def journal_bot(tmp_path: Path) -> JournalBot:
             return_value={"tags": ["journal", "work"], "mood": None}
         ),
         update_frontmatter=AsyncMock(),
+        update_marked_entry=AsyncMock(return_value=True),
         note_has_entry=AsyncMock(return_value=True),
         note_has_mood=AsyncMock(return_value=False),
         get_last_entry_time=AsyncMock(
@@ -138,6 +144,7 @@ def _private_update(
     callback_data: str | None = None,
     message_id: int = 1,
     reply_to_message: object | None = None,
+    edited_message: bool = False,
 ) -> SimpleNamespace:
     """Build a minimal private Update-like object."""
     message = SimpleNamespace(
@@ -169,6 +176,7 @@ def _private_update(
         effective_user=SimpleNamespace(id=user_id),
         effective_message=message,
         callback_query=callback_query,
+        edited_message=message if edited_message else None,
     )
 
 
@@ -292,7 +300,8 @@ async def test_message_timestamp_window(journal_bot: JournalBot) -> None:
     ]
     assert entries[0].startswith("%% ")
     assert "\nfirst" in entries[0]
-    assert entries[1] == "second"
+    assert "second" in entries[1]
+    assert "tg-entry-start" in entries[1]
 
 
 @pytest.mark.asyncio
@@ -308,7 +317,7 @@ async def test_message_timestamp_window_rollover(journal_bot: JournalBot) -> Non
 
     entry = journal_bot._repository.append_entry.await_args.args[1]  # type: ignore
     assert entry.startswith("%% ")
-    assert entry.endswith("\nnew window")
+    assert "\nnew window\n" in entry
 
 
 @pytest.mark.asyncio
@@ -620,6 +629,20 @@ async def test_send_attachment_uses_media_method_by_extension(
 
 
 @pytest.mark.asyncio
+async def test_send_chunked_text_and_payload_delegators(
+    journal_bot: JournalBot,
+) -> None:
+    """Delegator wrappers should route text and payload sending through services."""
+    context = _context()
+    await journal_bot._send_chunked_text(1, context.bot, "hello")
+
+    payload = parse_note_render_payload("body text")
+    await journal_bot._send_note_payload(1, context.bot, payload)
+
+    assert context.bot.send_message.await_count >= 2  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
 async def test_delete_command_error_paths(journal_bot: JournalBot) -> None:
     """Delete command should validate args and surface missing day/note paths."""
     update = _private_update()
@@ -673,6 +696,31 @@ async def test_flush_album_entry_paths(journal_bot: JournalBot) -> None:
 
     await journal_bot.flush_album_entry(context)
     assert journal_bot._repository.append_entry.await_count >= 1  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_flush_album_entry_handles_append_oserror(
+    journal_bot: JournalBot,
+) -> None:
+    """Album flush should swallow repository write errors and avoid success ack."""
+    context = _context()
+    context.job = SimpleNamespace(data={"chat_id": 1, "media_group_id": "g1"})
+    context.application.chat_data = {
+        1: {
+            ALBUMS_KEY: {
+                "g1": {
+                    "note_dt": datetime(2026, 3, 7, 18, 34, tzinfo=UTC),
+                    "caption": "cap",
+                    "images": ["![[a.jpg]]"],
+                }
+            }
+        }
+    }
+    journal_bot._repository.append_entry = AsyncMock(side_effect=OSError("disk"))  # type: ignore[attr-defined]
+
+    await journal_bot.flush_album_entry(context)
+
+    assert context.bot.send_message.await_count == 0  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -752,7 +800,7 @@ async def test_handle_error_and_auth_rejections(journal_bot: JournalBot) -> None
 def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
     """Keyboard builders and handler registrations should be stable."""
     mood_markup = _mood_keyboard()
-    tags_markup = _tags_keyboard({"family"})
+    tags_markup = _tags_keyboard({"family"}, journal_bot._settings.tag_choices)
     assert mood_markup.inline_keyboard
     assert tags_markup.inline_keyboard
     assert tags_markup.inline_keyboard[0][0].text.startswith("✅")
@@ -773,6 +821,441 @@ def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
     assert STARTUP_JOB_NAME in jq.once_jobs
     assert jq.once_jobs[STARTUP_JOB_NAME]["when"] == 0
     assert jq.repeat["interval"] == 300
+
+
+@pytest.mark.asyncio
+async def test_edited_text_message_updates_existing_entry(
+    journal_bot: JournalBot,
+) -> None:
+    """Edited text message should update the original entry instead of appending."""
+    journal_bot._repository.update_marked_entry = AsyncMock(return_value=True)  # type: ignore[attr-defined]
+    context = _context()
+    update = _private_update(text="edited text", message_id=42, edited_message=True)
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 0  # type: ignore[attr-defined]
+    assert journal_bot._repository.update_marked_entry.await_count == 1  # type: ignore[attr-defined]
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "Edited entry updated" in reply
+
+
+@pytest.mark.asyncio
+async def test_edited_text_message_missing_marker_is_not_appended(
+    journal_bot: JournalBot,
+) -> None:
+    """Edited text without marker should not create a duplicate journal entry."""
+    journal_bot._repository.update_marked_entry = AsyncMock(return_value=False)  # type: ignore[attr-defined]
+    context = _context()
+    update = _private_update(text="edited text", message_id=77, edited_message=True)
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    assert journal_bot._repository.append_entry.await_count == 0  # type: ignore[attr-defined]
+    assert journal_bot._repository.update_marked_entry.await_count == 1  # type: ignore[attr-defined]
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "Could not locate original entry" in reply
+
+
+@pytest.mark.asyncio
+async def test_prompt_for_mood_respects_settings_flag(
+    journal_bot: JournalBot,
+) -> None:
+    """Mood prompt should be skipped when prompt_for_mood_if_missing is false."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        prompt_for_mood_if_missing=False,
+    )
+    context = _context()
+    update = _private_update(text="hello")
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    replies = [
+        call.args[0] for call in update.effective_message.reply_text.await_args_list
+    ]
+    assert replies == ["✅ Added to journal."]
+
+
+@pytest.mark.asyncio
+async def test_config_command_and_prompt_toggle_flow(
+    journal_bot: JournalBot,
+) -> None:
+    """Config command should guide and apply prompt toggle updates safely."""
+    context = _context()
+    update = _private_update()
+
+    await journal_bot.config_command(update, context)
+    first_reply = update.effective_message.reply_text.await_args
+    assert "Current runtime config" in first_reply.args[0]
+    assert first_reply.kwargs["reply_markup"]
+
+    choose_prompt = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}edit:prompt_for_mood_if_missing"
+    )
+    await journal_bot.callback_router(choose_prompt, context)
+    assert choose_prompt.callback_query.edit_message_text.await_count == 1
+
+    set_false = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}set_prompt:false"
+    )
+    await journal_bot.callback_router(set_false, context)
+
+    confirm = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm")
+    await journal_bot.callback_router(confirm, context)
+
+    assert journal_bot._settings.prompt_for_mood_if_missing is False
+
+
+def test_runtime_config_helpers_cover_key_branches(journal_bot: JournalBot) -> None:
+    """Runtime config helper methods should return stable marker and summaries."""
+    marker = journal_bot._message_marker(1, 42)
+    assert marker == "1:42"
+    assert "tg-entry-start" in journal_bot._wrap_body_with_marker("hello", marker)
+    assert "Current runtime config" in journal_bot._config_summary()
+
+
+@pytest.mark.asyncio
+async def test_apply_runtime_config_and_reschedule_branches(
+    journal_bot: JournalBot,
+) -> None:
+    """Runtime config application should handle tag choices, brief time, and bool."""
+    context = _context()
+
+    class _Job:
+        def __init__(self) -> None:
+            self.removed = False
+
+        def schedule_removal(self) -> None:
+            self.removed = True
+
+    job = _Job()
+    context.job_queue.get_jobs_by_name = lambda _name: [job]
+
+    msg = journal_bot._apply_runtime_config("tag_choices", ("one", "two"), context)
+    assert "tag_choices" in msg
+    assert journal_bot._settings.tag_choices == ("one", "two")
+
+    msg = journal_bot._apply_runtime_config("daily_brief_time_utc", None, context)
+    assert "disabled" in msg
+    assert job.removed
+
+    brief_time = datetime.strptime("11:30", "%H:%M").time()
+    msg = journal_bot._apply_runtime_config(
+        "daily_brief_time_utc",
+        brief_time,
+        context,
+    )
+    assert "11:30:00" in msg
+
+    msg = journal_bot._apply_runtime_config(
+        "prompt_for_mood_if_missing",
+        True,
+        context,
+    )
+    assert "true" in msg
+
+    with pytest.raises(ValueError, match="Unsupported config key"):
+        journal_bot._apply_runtime_config("unknown", "x", context)
+
+    # Cover branch where reschedule is called without a job queue.
+    journal_bot._reschedule_daily_brief(None, None)
+
+
+@pytest.mark.asyncio
+async def test_maybe_handle_config_text_input_branches(journal_bot: JournalBot) -> None:
+    """Guided config text parser should validate and stage supported values."""
+    update = _private_update()
+    context = _context()
+    message = SimpleNamespace(text="x", reply_text=AsyncMock())
+
+    assert not await journal_bot._maybe_handle_config_text_input(
+        update, context, message
+    )
+
+    context.chat_data[CONFIG_FLOW_KEY] = {
+        "state": "await_confirm",
+        "field": "tag_choices",
+    }
+    assert not await journal_bot._maybe_handle_config_text_input(
+        update, context, message
+    )
+
+    context.chat_data[CONFIG_FLOW_KEY] = {"state": "await_input", "field": 123}
+    assert not await journal_bot._maybe_handle_config_text_input(
+        update, context, message
+    )
+
+    context.chat_data[CONFIG_FLOW_KEY] = {
+        "state": "await_input",
+        "field": "tag_choices",
+    }
+    message.text = None
+    assert await journal_bot._maybe_handle_config_text_input(update, context, message)
+
+    message.text = "bad tag"
+    assert await journal_bot._maybe_handle_config_text_input(update, context, message)
+
+    message.text = "family,focus"
+    assert await journal_bot._maybe_handle_config_text_input(update, context, message)
+    assert context.chat_data[CONFIG_PENDING_KEY]["key"] == "tag_choices"
+
+    context.chat_data[CONFIG_FLOW_KEY] = {
+        "state": "await_input",
+        "field": "daily_brief_time_utc",
+    }
+    message.text = "not-time"
+    assert await journal_bot._maybe_handle_config_text_input(update, context, message)
+
+    message.text = "09:15"
+    assert await journal_bot._maybe_handle_config_text_input(update, context, message)
+    assert context.chat_data[CONFIG_PENDING_KEY]["value"] == "09:15:00"
+
+    context.chat_data[CONFIG_FLOW_KEY] = {"state": "await_input", "field": "x"}
+    message.text = "whatever"
+    assert await journal_bot._maybe_handle_config_text_input(update, context, message)
+
+
+@pytest.mark.asyncio
+async def test_config_callback_router_defensive_and_cancel_back_paths(
+    journal_bot: JournalBot,
+) -> None:
+    """Config callback router should validate malformed states and support cancel/back."""
+    context = _context()
+
+    malformed = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}")
+    await journal_bot.callback_router(malformed, context)
+
+    edit_tag = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}edit:tag_choices"
+    )
+    await journal_bot.callback_router(edit_tag, context)
+    assert context.chat_data[CONFIG_FLOW_KEY]["field"] == "tag_choices"
+
+    edit_time = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}edit:daily_brief_time_utc"
+    )
+    await journal_bot.callback_router(edit_time, context)
+    assert context.chat_data[CONFIG_FLOW_KEY]["field"] == "daily_brief_time_utc"
+
+    invalid_set_prompt = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}set_prompt:maybe"
+    )
+    await journal_bot.callback_router(invalid_set_prompt, context)
+
+    no_pending = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm")
+    context.chat_data.pop(CONFIG_PENDING_KEY, None)
+    await journal_bot.callback_router(no_pending, context)
+
+    invalid_pending_key = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm"
+    )
+    context.chat_data[CONFIG_PENDING_KEY] = {"key": None, "value": "x"}
+    await journal_bot.callback_router(invalid_pending_key, context)
+
+    invalid_pending_value = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm"
+    )
+    context.chat_data[CONFIG_PENDING_KEY] = {"key": "tag_choices", "value": "bad tag"}
+    await journal_bot.callback_router(invalid_pending_value, context)
+
+    cancel = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}cancel")
+    await journal_bot.callback_router(cancel, context)
+
+    back = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}back")
+    await journal_bot.callback_router(back, context)
+
+    unknown = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}nope")
+    await journal_bot.callback_router(unknown, context)
+
+
+@pytest.mark.asyncio
+async def test_edited_message_non_text_and_invalid_id_are_ignored(
+    journal_bot: JournalBot,
+) -> None:
+    """Edited media and invalid IDs should not append entries."""
+    context = _context()
+    edited_media = _private_update(
+        text=None,
+        photo=[object()],
+        edited_message=True,
+        message_id=7,
+    )
+    await journal_bot.handle_journal_entry(edited_media, context)
+    assert journal_bot._repository.append_entry.await_count == 0  # type: ignore[attr-defined]
+
+    invalid_id = _private_update(text="hello")
+    invalid_id.effective_message.message_id = None
+    await journal_bot.handle_journal_entry(invalid_id, context)
+    assert journal_bot._repository.append_entry.await_count == 0  # type: ignore[attr-defined]
+
+
+def test_extract_reply_quote_without_source_tracking_returns_quote(
+    journal_bot: JournalBot,
+) -> None:
+    """Reply quote should be returned unchanged when source tracking is absent."""
+    message = SimpleNamespace(
+        reply_to_message=SimpleNamespace(
+            message_id=123,
+            text="quoted",
+            text_markdown_urled="quoted",
+            caption=None,
+            from_user=SimpleNamespace(id=1),
+            photo=None,
+            voice=None,
+            video=None,
+            video_note=None,
+            location=None,
+        ),
+        from_user=SimpleNamespace(id=1, is_bot=False),
+    )
+
+    quote = journal_bot._extract_reply_quote_with_source_link(
+        message,
+        1,
+        datetime.now(UTC),
+    )
+    assert quote == "quoted"
+
+
+@pytest.mark.asyncio
+async def test_config_command_early_return_paths(journal_bot: JournalBot) -> None:
+    """Config command should return for unauthorized users or missing message."""
+    unauthorized = _private_update(user_id=99)
+    await journal_bot.config_command(unauthorized, _context())
+    assert unauthorized.effective_message.reply_text.await_count == 0
+
+    missing_message = _private_update()
+    missing_message.effective_message = None
+    await journal_bot.config_command(missing_message, _context())
+
+
+@pytest.mark.asyncio
+async def test_config_summary_with_daily_brief_time(journal_bot: JournalBot) -> None:
+    """Config summary should include formatted daily brief time when enabled."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        daily_brief_time_utc=datetime.strptime("12:45", "%H:%M").time(),
+    )
+    summary = journal_bot._config_summary()
+    assert "12:45:00" in summary
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_entry_returns_when_config_input_consumed(
+    journal_bot: JournalBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Journal handler should stop when config text flow consumes the message."""
+    context = _context()
+    update = _private_update(text="config input")
+
+    async def _consume(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        return True
+
+    monkeypatch.setattr(journal_bot, "_maybe_handle_config_text_input", _consume)
+    await journal_bot.handle_journal_entry(update, context)
+    assert journal_bot._repository.append_entry.await_count == 0  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_edited_message_quote_path_and_oserror(journal_bot: JournalBot) -> None:
+    """Edited text update should build quoted body and handle OSError safely."""
+    replied = SimpleNamespace(
+        text="old",
+        text_markdown_urled="old",
+        caption=None,
+        from_user=SimpleNamespace(id=1),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    update = _private_update(
+        text="edited",
+        reply_to_message=replied,
+        message_id=10,
+        edited_message=True,
+    )
+    context = _context()
+    journal_bot._repository.update_marked_entry = AsyncMock(side_effect=OSError("disk"))  # type: ignore[attr-defined]
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "Vault write failed" in reply
+
+
+@pytest.mark.asyncio
+async def test_config_callback_edit_unknown_and_daily_confirm_branch(
+    journal_bot: JournalBot,
+) -> None:
+    """Config callback should return on unknown edit key and parse daily time on confirm."""
+    context = _context()
+
+    unknown_edit = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}edit:unknown"
+    )
+    await journal_bot.callback_router(unknown_edit, context)
+
+    context.chat_data[CONFIG_PENDING_KEY] = {
+        "key": "daily_brief_time_utc",
+        "value": "08:30",
+    }
+    confirm = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm")
+    await journal_bot.callback_router(confirm, context)
+    assert journal_bot._settings.daily_brief_time_utc is not None
+    assert journal_bot._settings.daily_brief_time_utc.strftime("%H:%M:%S") == "08:30:00"
+
+
+@pytest.mark.asyncio
+async def test_config_callback_confirm_handles_persist_oserror(
+    journal_bot: JournalBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Config confirm should surface persistence failures without crashing."""
+    context = _context()
+    context.chat_data[CONFIG_PENDING_KEY] = {
+        "key": "prompt_for_mood_if_missing",
+        "value": True,
+    }
+
+    def _raise(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise OSError("disk")
+
+    monkeypatch.setattr(journal_bot, "_apply_runtime_config", _raise)
+    update = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm")
+
+    await journal_bot.callback_router(update, context)
+
+    text = update.callback_query.edit_message_text.await_args.args[0]
+    assert "Failed to persist config to disk" in text
+
+
+@pytest.mark.asyncio
+async def test_check_mood_timers_skips_when_prompt_disabled(
+    journal_bot: JournalBot,
+) -> None:
+    """Timer should exit early when prompt_for_mood_if_missing is disabled."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        prompt_for_mood_if_missing=False,
+    )
+    context = _context()
+    journal_bot._get_active_chats(context).add(1)
+    context.application.chat_data[1] = {}
+
+    await journal_bot.check_mood_timers(context)
+    assert context.bot.send_message.await_count == 0  # type: ignore[attr-defined]
 
 
 def test_register_jobs_daily_brief_toggle(journal_bot: JournalBot) -> None:
@@ -1130,6 +1613,7 @@ async def test_photo_and_flush_defensive_branches(
         datetime.now(UTC),
         True,
         1,
+        "1:1",
     )
 
     update_no_photo = _private_update(text=None, photo=[])
@@ -1139,6 +1623,7 @@ async def test_photo_and_flush_defensive_branches(
         datetime.now(UTC),
         True,
         1,
+        "1:2",
     )
 
     update_no_voice = _private_update(text=None, voice=None)
@@ -1148,6 +1633,7 @@ async def test_photo_and_flush_defensive_branches(
         datetime.now(UTC),
         True,
         1,
+        "1:4",
     )
 
     update_no_video = _private_update(text=None, video=None)
@@ -1157,6 +1643,7 @@ async def test_photo_and_flush_defensive_branches(
         datetime.now(UTC),
         True,
         1,
+        "1:5",
     )
 
     update_no_video_note = _private_update(text=None, video_note=None)
@@ -1166,6 +1653,7 @@ async def test_photo_and_flush_defensive_branches(
         datetime.now(UTC),
         True,
         1,
+        "1:6",
     )
 
     class _Photo:
@@ -1185,6 +1673,7 @@ async def test_photo_and_flush_defensive_branches(
         datetime.now(UTC),
         True,
         1,
+        "1:3",
     )
 
     await journal_bot.flush_album_entry(_context())

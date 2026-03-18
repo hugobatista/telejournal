@@ -198,6 +198,45 @@ class VaultRepository:
 
         return note_path
 
+    async def update_marked_entry(
+        self,
+        note_dt: datetime,
+        marker: str,
+        body: str,
+        frontmatter_updates: dict[str, Any] | None = None,
+    ) -> bool:
+        """Update an existing marker-delimited entry body.
+
+        Returns True when a marker block is found and updated, otherwise False.
+        """
+        note_path = self.get_note_path(note_dt)
+        lock = self._locks[note_path]
+        async with lock:
+            note_data = await self._read_note(note_path)
+            frontmatter = self._default_frontmatter(note_dt)
+            frontmatter.update(note_data.frontmatter)
+
+            if frontmatter_updates:
+                frontmatter.update(frontmatter_updates)
+
+            start_marker = f"<!-- tg-entry-start:{marker} -->"
+            end_marker = f"<!-- tg-entry-end:{marker} -->"
+            escaped_start = re.escape(start_marker)
+            escaped_end = re.escape(end_marker)
+            pattern = re.compile(
+                rf"{escaped_start}\n.*?\n{escaped_end}",
+                re.DOTALL,
+            )
+
+            clean_body = body.strip()
+            replacement = f"{start_marker}\n{clean_body}\n{end_marker}"
+            next_body, count = pattern.subn(replacement, note_data.body, count=1)
+            if count == 0:
+                return False
+
+            await self._write_note(note_path, frontmatter, next_body)
+            return True
+
     async def update_frontmatter(
         self,
         note_dt: datetime,

@@ -70,5 +70,13 @@ def load_env_config() -> dict[str, Any]:
     if daily_brief_time_utc:
         config["daily_brief_time_utc"] = daily_brief_time_utc
 
+    tag_choices = os.getenv("TAG_CHOICES", "").strip()
+    if tag_choices:
+        config["tag_choices"] = tag_choices
+
+    prompt_for_mood_if_missing = os.getenv("PROMPT_FOR_MOOD_IF_MISSING", "").strip()
+    if prompt_for_mood_if_missing:
+        config["prompt_for_mood_if_missing"] = prompt_for_mood_if_missing
+
     expanded = expand_env_vars(config)
     return cast(dict[str, Any], expanded)

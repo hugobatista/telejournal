@@ -10,6 +10,16 @@ from typing import Any
 
 from telejournal.config_loader import expand_env_vars, load_env_config, load_yaml_config
 
+DEFAULT_TAG_CHOICES: tuple[str, ...] = (
+    "family",
+    "health",
+    "love",
+    "hobby",
+    "other",
+    "finance",
+    "social",
+)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -22,6 +32,9 @@ class Settings:
     message_timestamp_window_seconds: int = 60
     secure_file_permissions: bool = True
     daily_brief_time_utc: time | None = None
+    tag_choices: tuple[str, ...] = DEFAULT_TAG_CHOICES
+    prompt_for_mood_if_missing: bool = True
+    config_path: Path | None = None
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -29,7 +42,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "message_timestamp_window_seconds": 60,
     "secure_file_permissions": True,
     "daily_brief_time_utc": "09:00",
+    "tag_choices": list(DEFAULT_TAG_CHOICES),
+    "prompt_for_mood_if_missing": True,
 }
+
+_TAG_CHOICE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
 def _parse_allowed_user_ids(raw_value: str) -> set[int]:
@@ -94,6 +111,42 @@ def _parse_daily_brief_time_utc(raw_value: Any) -> time | None:
     raise ValueError("DAILY_BRIEF_TIME_UTC must be '0', 'HH:MM', or 'HH:MM:SS'")
 
 
+def _parse_tag_choices(raw_value: Any) -> tuple[str, ...]:
+    """Parse tag choices from CSV string or list-like values.
+
+    Rules:
+    - Lowercase letters, numbers, underscore, hyphen only
+    - Maximum length of 32 characters
+    - Duplicate values are removed while preserving order
+    - At least one tag must remain after normalization
+    """
+    raw_items: list[Any]
+    if isinstance(raw_value, str):
+        raw_items = raw_value.split(",")
+    elif isinstance(raw_value, (list, tuple, set)):
+        raw_items = list(raw_value)
+    else:
+        raise ValueError("TAG_CHOICES must be a CSV string or list")
+
+    parsed: list[str] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        tag = str(raw_item).strip().lower()
+        if not tag:
+            continue
+        if not _TAG_CHOICE_RE.fullmatch(tag):
+            raise ValueError("TAG_CHOICES items must match ^[a-z0-9][a-z0-9_-]{0,31}$")
+        if tag in seen:
+            continue
+        seen.add(tag)
+        parsed.append(tag)
+
+    if not parsed:
+        raise ValueError("TAG_CHOICES must contain at least one valid tag")
+
+    return tuple(parsed)
+
+
 def _resolve_config_path(config_path: Path | None) -> Path | None:
     """Resolve config path to an absolute path when provided."""
     if config_path is None:
@@ -151,6 +204,10 @@ def load_settings(
     daily_brief_time_utc = _parse_daily_brief_time_utc(
         merged.get("daily_brief_time_utc", "0")
     )
+    tag_choices = _parse_tag_choices(merged.get("tag_choices", []))
+    prompt_for_mood_if_missing = _parse_bool(
+        merged.get("prompt_for_mood_if_missing", True)
+    )
 
     return Settings(
         telegram_token=token,
@@ -160,4 +217,7 @@ def load_settings(
         message_timestamp_window_seconds=window_seconds,
         secure_file_permissions=secure_permissions,
         daily_brief_time_utc=daily_brief_time_utc,
+        tag_choices=tag_choices,
+        prompt_for_mood_if_missing=prompt_for_mood_if_missing,
+        config_path=yaml_path,
     )

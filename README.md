@@ -28,6 +28,9 @@ Captured content is appended to your daily note with timestamped entries and str
 - `/show` asks whether to show note text only or rendered (text + embedded attachments)
 - Daily UTC "on this day" brief sends a years summary and asks whether to show history as notes only or rendered
 - Replies to historical bot messages can include a quote plus a clickable source-note link back to the original daily note
+- Edited text messages update their original journal entry in place instead of creating a duplicate
+- Guided `/config` command for runtime updates of tag choices, daily brief time, and mood prompt toggle
+- `/config` updates are persisted to YAML so values survive bot restarts (existing config files are backed up before overwrite)
 
 ## Usage
 
@@ -118,6 +121,10 @@ After the bot is running, these commands are available in your private chat:
 - `/todayinhistory` Show same-day note years and choose notes only or rendered output
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
+- `/config` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, and `prompt_for_mood_if_missing`
+  - Changes are persisted immediately.
+  - If the bot started from a YAML config file, that file is backed up and updated.
+  - If no YAML config was used, `./config.yaml` is created/updated.
 
 ### Helpful CLI Commands
 
@@ -151,6 +158,8 @@ TELEGRAM_ALLOWED_USER_IDS=123456,987654
 - `MESSAGE_TIMESTAMP_WINDOW_SECONDS` (default: `60`) - Messages within this window share the same timestamp
 - `SECURE_FILE_PERMISSIONS` (default: `true`) - Set restrictive permissions (0o700/0o600) on vault directories and files for security. Set to `false` only if you need broader file access.
 - `DAILY_BRIEF_TIME_UTC` (default: `09:00`) - Daily UTC time for historical same-day brief (`HH:MM` or `HH:MM:SS`). Set to `0` to disable.
+- `TAG_CHOICES` (default: `family,health,love,hobby,other,finance,social`) - Comma-separated tag choices used by inline tag buttons.
+- `PROMPT_FOR_MOOD_IF_MISSING` (default: `true`) - Enable/disable automatic mood prompts after entry writes and timer checks.
 
 ## Configuration
 
@@ -181,6 +190,8 @@ log_level: INFO
 message_timestamp_window_seconds: 60
 secure_file_permissions: true
 daily_brief_time_utc: "0"
+tag_choices: ["family", "health", "love", "hobby", "other", "finance", "social"]
+prompt_for_mood_if_missing: true
 ```
 
 **Configuration Keys:**
@@ -192,6 +203,8 @@ daily_brief_time_utc: "0"
 - `message_timestamp_window_seconds` (optional, default: `60`) - Messages within this window share the same timestamp
 - `secure_file_permissions` (optional, default: `true`) - Set restrictive file permissions for security
 - `daily_brief_time_utc` (optional, default: `09:00`) - Daily UTC time for the historical same-day brief (`HH:MM` or `HH:MM:SS`), or `0` to disable
+- `tag_choices` (optional, default: `family,health,love,hobby,other,finance,social`) - List of inline tag button choices
+- `prompt_for_mood_if_missing` (optional, default: `true`) - Enable/disable mood prompts when entries exist without mood
 
 **Environment Variable Expansion:**
 

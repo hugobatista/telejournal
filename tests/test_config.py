@@ -11,6 +11,7 @@ from telejournal.config import (
     _parse_daily_brief_time_utc,
     _normalize_allowed_user_ids,
     _parse_allowed_user_ids,
+    _parse_tag_choices,
     load_settings,
 )
 
@@ -72,6 +73,8 @@ def test_load_settings_builds_defaults(
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1, 2")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "90")
     monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "09:30")
+    monkeypatch.setenv("TAG_CHOICES", "family,focus")
+    monkeypatch.setenv("PROMPT_FOR_MOOD_IF_MISSING", "false")
 
     settings = load_settings()
 
@@ -82,6 +85,8 @@ def test_load_settings_builds_defaults(
     assert settings.message_timestamp_window_seconds == 90
     assert settings.daily_brief_time_utc is not None
     assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "09:30:00"
+    assert settings.tag_choices == ("family", "focus")
+    assert settings.prompt_for_mood_if_missing is False
 
 
 def test_load_settings_defaults_window_seconds(
@@ -96,6 +101,31 @@ def test_load_settings_defaults_window_seconds(
 
     settings = load_settings()
     assert settings.message_timestamp_window_seconds == 60
+
+
+def test_load_settings_defaults_tag_choices_and_mood_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Tag choices and mood-prompt toggle should default predictably."""
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
+    monkeypatch.delenv("TAG_CHOICES", raising=False)
+    monkeypatch.delenv("PROMPT_FOR_MOOD_IF_MISSING", raising=False)
+
+    settings = load_settings()
+
+    assert settings.tag_choices == (
+        "family",
+        "health",
+        "love",
+        "hobby",
+        "other",
+        "finance",
+        "social",
+    )
+    assert settings.prompt_for_mood_if_missing is True
 
 
 def test_load_settings_daily_brief_defaults_to_morning_utc(
@@ -211,6 +241,10 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
                 "message_timestamp_window_seconds: 30",
                 "secure_file_permissions: false",
                 "daily_brief_time_utc: '07:45'",
+                "tag_choices:",
+                "  - family",
+                "  - focus",
+                "prompt_for_mood_if_missing: false",
             ]
         ),
         encoding="utf-8",
@@ -225,6 +259,8 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
     assert settings.secure_file_permissions is False
     assert settings.daily_brief_time_utc is not None
     assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "07:45:00"
+    assert settings.tag_choices == ("family", "focus")
+    assert settings.prompt_for_mood_if_missing is False
 
 
 def test_load_settings_priority_cli_over_yaml_over_env(
@@ -238,6 +274,8 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     monkeypatch.setenv("LOG_LEVEL", "error")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "10")
     monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "08:00")
+    monkeypatch.setenv("TAG_CHOICES", "envtag")
+    monkeypatch.setenv("PROMPT_FOR_MOOD_IF_MISSING", "false")
 
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(
@@ -249,6 +287,8 @@ def test_load_settings_priority_cli_over_yaml_over_env(
                 "log_level: warning",
                 "message_timestamp_window_seconds: 20",
                 "daily_brief_time_utc: '10:15'",
+                "tag_choices: [yaml, tags]",
+                "prompt_for_mood_if_missing: true",
             ]
         ),
         encoding="utf-8",
@@ -261,6 +301,8 @@ def test_load_settings_priority_cli_over_yaml_over_env(
             "log_level": "debug",
             "message_timestamp_window_seconds": 99,
             "daily_brief_time_utc": "13:45",
+            "tag_choices": ["cli", "tags"],
+            "prompt_for_mood_if_missing": False,
         },
     )
 
@@ -271,6 +313,8 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     assert settings.message_timestamp_window_seconds == 99
     assert settings.daily_brief_time_utc is not None
     assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "13:45:00"
+    assert settings.tag_choices == ("cli", "tags")
+    assert settings.prompt_for_mood_if_missing is False
 
 
 def test_load_settings_cli_env_expansion(
@@ -337,3 +381,22 @@ def test_normalize_allowed_user_ids_empty_sequence() -> None:
     """Empty list-like values should be rejected."""
     with pytest.raises(ValueError, match="at least one valid user ID"):
         _normalize_allowed_user_ids([])
+
+
+def test_parse_tag_choices_valid_values() -> None:
+    """Tag-choice parser should normalize, deduplicate, and preserve order."""
+    assert _parse_tag_choices("family, focus, FAMILY") == ("family", "focus")
+    assert _parse_tag_choices(["health", "Health", "hobby"]) == (
+        "health",
+        "hobby",
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "!!!", "bad tag", ["x", "bad tag"], 123],
+)
+def test_parse_tag_choices_rejects_invalid_values(value: object) -> None:
+    """Invalid tag choices should fail with a clear validation error."""
+    with pytest.raises(ValueError, match="TAG_CHOICES"):
+        _parse_tag_choices(value)

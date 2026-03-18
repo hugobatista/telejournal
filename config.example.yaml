@@ -5,3 +5,5 @@ log_level: INFO
 message_timestamp_window_seconds: 60
 secure_file_permissions: true
 daily_brief_time_utc: "0" # Set to "0" to disable, or specify time in "HH:MM" or "HH:MM:SS" format
+tag_choices: ["family", "health", "love", "hobby", "other", "finance", "social"]
+prompt_for_mood_if_missing: true

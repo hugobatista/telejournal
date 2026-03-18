@@ -379,6 +379,51 @@ async def test_secure_permissions_disabled(tmp_path: Path) -> None:
     # Create a note
     await repo.append_entry(note_dt, "Test entry")
 
+
+@pytest.mark.asyncio
+async def test_update_marked_entry_replaces_existing_payload(tmp_path: Path) -> None:
+    """Marker-based updates should replace only the marker-delimited payload."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    marker = "1:10"
+
+    await repo.append_entry(
+        note_dt,
+        "\n".join(
+            [
+                "%% 18:34:42 %%",
+                f"<!-- tg-entry-start:{marker} -->",
+                "old text",
+                f"<!-- tg-entry-end:{marker} -->",
+            ]
+        ),
+    )
+
+    updated = await repo.update_marked_entry(
+        note_dt,
+        marker,
+        "new text",
+        frontmatter_updates={"mood": 4},
+    )
+    assert updated
+
+    content = (await repo.get_note_content(note_dt)) or ""
+    assert "new text" in content
+    assert "old text" not in content
+    assert "%% 18:34:42 %%" in content
+    assert "mood: 4" in content
+
+
+@pytest.mark.asyncio
+async def test_update_marked_entry_returns_false_when_missing(tmp_path: Path) -> None:
+    """Marker updates should fail safely when the marker block is absent."""
+    repo = VaultRepository(tmp_path)
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nplain entry")
+
+    updated = await repo.update_marked_entry(note_dt, "1:999", "replacement")
+    assert not updated
+
     # Year directory should exist but not have restrictive permissions set by us
     year_dir = tmp_path / "2026"
     assert year_dir.exists()
