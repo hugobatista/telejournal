@@ -2,3 +2,4 @@
 coding standards and passes all tests before being merged into the main branch.
 2) make sure you also respect python.insctructions.md when implemeting python code. This file contains important guidelines for writing clean and maintainable Python code in this project. 
 3) make sure to keep readme.md up to date with any new features or changes you make to the project. This will help other developers understand how to use and contribute to the project effectively.
+4) when adding new config settings, make sure they are supported on CLI options, environment variables and config file. This will ensure that users have multiple ways to configure the application according to their preferences.
