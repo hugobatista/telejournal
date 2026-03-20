@@ -14,26 +14,24 @@ class OutputHandler:
         """Initialize the output handler with the shared logger."""
         self.logger = get_logger()
 
-    def info(self, message: str, echo: bool = False) -> None:
-        """Log an info message and optionally print it to the console."""
-        self.logger.info(message)
+    def _emit(self, level: str, message: str, echo: bool) -> None:
+        """Log a message at ``level`` and optionally echo it to console."""
+        getattr(self.logger, level)(message)
         if echo:
             typer.echo(message)
+
+    def info(self, message: str, echo: bool = False) -> None:
+        """Log an info message and optionally print it to the console."""
+        self._emit("info", message, echo)
 
     def debug(self, message: str, echo: bool = False) -> None:
         """Log a debug message and optionally print it to the console."""
-        self.logger.debug(message)
-        if echo:
-            typer.echo(message)
+        self._emit("debug", message, echo)
 
     def warning(self, message: str, echo: bool = False) -> None:
         """Log a warning message and optionally print it to the console."""
-        self.logger.warning(message)
-        if echo:
-            typer.echo(message)
+        self._emit("warning", message, echo)
 
     def error(self, message: str, echo: bool = False) -> None:
         """Log an error message and optionally print it to the console."""
-        self.logger.error(message)
-        if echo:
-            typer.echo(message)
+        self._emit("error", message, echo)
