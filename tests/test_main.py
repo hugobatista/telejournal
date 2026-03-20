@@ -59,6 +59,7 @@ class _FakeJournalBot:
         self.settings = settings
         self.handlers_registered = False
         self.jobs_registered = False
+        self.shutdown_called = False
 
     def register_handlers(self, application: object) -> None:
         del application
@@ -68,6 +69,9 @@ class _FakeJournalBot:
         del job_queue
         self.jobs_registered = True
 
+    async def shutdown(self) -> None:
+        self.shutdown_called = True
+
 
 def test_start_bot_registers_and_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -76,10 +80,13 @@ def test_start_bot_registers_and_runs(
     settings = Settings("token", tmp_path, {1})
     app = _FakeApplication(has_job_queue=True)
     builder = _FakeBuilder(app)
+    original_asyncio_run = main_module.asyncio.run
 
     monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
     monkeypatch.setattr(main_module, "load_settings", lambda: settings)
-    monkeypatch.setattr(main_module, "JournalBot", _FakeJournalBot)
+    fake_bot = _FakeJournalBot(settings)
+    monkeypatch.setattr(main_module, "JournalBot", lambda _s: fake_bot)
+    monkeypatch.setattr(main_module.asyncio, "run", original_asyncio_run)
     monkeypatch.setattr(
         main_module.Application,  # type: ignore[attr-defined]
         "builder",
@@ -92,6 +99,69 @@ def test_start_bot_registers_and_runs(
     assert builder.last_post_init is main_module.post_init
     assert app.bot_data[main_module.SETTINGS_BOT_DATA_KEY] is settings
     assert app.run_polling_called
+
+
+def test_start_bot_flushes_pending_writes_on_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Startup wrapper should invoke bot shutdown hook after polling exits."""
+    settings = Settings("token", tmp_path, {1})
+    app = _FakeApplication(has_job_queue=True)
+    builder = _FakeBuilder(app)
+    fake_bot = _FakeJournalBot(settings)
+    original_asyncio_run = main_module.asyncio.run
+
+    def _run(coro: object) -> None:
+        original_asyncio_run(coro)
+
+    monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+    monkeypatch.setattr(main_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(main_module, "JournalBot", lambda _s: fake_bot)
+    monkeypatch.setattr(main_module.asyncio, "run", _run)
+    monkeypatch.setattr(
+        main_module.Application,  # type: ignore[attr-defined]
+        "builder",
+        staticmethod(lambda: builder),
+    )
+
+    main_module._start_bot(settings.telegram_token, settings)
+    assert fake_bot.shutdown_called
+
+
+def test_start_bot_flushes_pending_writes_when_polling_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Shutdown flush should still happen when polling exits with an error."""
+    settings = Settings("token", tmp_path, {1})
+    app = _FakeApplication(has_job_queue=True)
+    builder = _FakeBuilder(app)
+    fake_bot = _FakeJournalBot(settings)
+    original_asyncio_run = main_module.asyncio.run
+
+    def _raise_polling(*, allowed_updates: object) -> None:
+        del allowed_updates
+        raise RuntimeError("polling failed")
+
+    app.run_polling = _raise_polling
+
+    def _run(coro: object) -> None:
+        original_asyncio_run(coro)
+
+    monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+    monkeypatch.setattr(main_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(main_module, "JournalBot", lambda _s: fake_bot)
+    monkeypatch.setattr(main_module.asyncio, "run", _run)
+    monkeypatch.setattr(
+        main_module.Application,  # type: ignore[attr-defined]
+        "builder",
+        staticmethod(lambda: builder),
+    )
+
+    with pytest.raises(RuntimeError, match="polling failed"):
+        main_module._start_bot(settings.telegram_token, settings)
+    assert fake_bot.shutdown_called
 
 
 def test_fallback_command_description() -> None:
@@ -303,6 +373,51 @@ def test_run_command_verbose_emits_summary(
     assert any("starting" in message for message in fake_output.messages)
 
 
+def test_run_command_verbose_emits_github_storage_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verbose mode should include github storage summary when configured."""
+    settings = Settings(
+        "token",
+        tmp_path,
+        {1},
+        log_level="DEBUG",
+        storage_provider="github_repo",
+        github_owner="acme",
+        github_repo="journal",
+        github_branch="main",
+        github_token="token",
+        github_batch_window_seconds=120,
+    )
+
+    class _FakeOutput:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def info(self, message: str, echo: bool = False) -> None:
+            del echo
+            self.messages.append(message)
+
+        def error(self, message: str, echo: bool = False) -> None:
+            del echo
+            self.messages.append(message)
+
+    fake_output = _FakeOutput()
+    monkeypatch.setattr(main_module, "OutputHandler", lambda: fake_output)
+    monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+    monkeypatch.setattr(main_module, "setup_default_logging", lambda: None)
+    monkeypatch.setattr(main_module, "setup_logging", lambda _l, verbose: None)
+    monkeypatch.setattr(main_module, "load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr(main_module, "_start_bot", lambda _t, _s: None)
+
+    result = RUNNER.invoke(main_module.app, ["run", "--verbose"])
+
+    assert result.exit_code == 0
+    assert any("Storage: github_repo" in message for message in fake_output.messages)
+    assert any("batch window" in message for message in fake_output.messages)
+
+
 def test_run_command_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """CLI run should exit non-zero on configuration errors."""
     monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
@@ -378,16 +493,25 @@ def test_build_cli_overrides(tmp_path: Path) -> None:
     """CLI override builder should normalize paths to strings."""
     overrides = main_module._build_cli_overrides(
         "token",
+        "obsidian_vault",
         tmp_path,
+        True,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         "1,2",
         "INFO",
         30,
-        True,
         "09:15",
     )
 
     assert overrides["telegram_token"] == "token"
-    assert overrides["vault_root"] == str(tmp_path)
+    assert overrides["storage"]["provider"] == "obsidian_vault"
+    assert overrides["storage"]["obsidian_vault"]["root"] == str(tmp_path)
     assert overrides["allowed_user_ids"] == "1,2"
     assert overrides["daily_brief_time_utc"] == "09:15"
 

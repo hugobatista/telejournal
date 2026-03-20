@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -79,28 +80,79 @@ class NoteDeliveryService:
         source_note_dt: datetime | None = None,
     ) -> None:
         """Send one attachment based on file extension with graceful fallback."""
+        repository = self._repository()
         attachment_path = self.resolve_attachment_path(attachment_rel)
         if attachment_path is None:
-            await bot.send_message(
+            fetch_bytes = getattr(repository, "get_attachment_bytes", None)
+            if not callable(fetch_bytes):
+                await bot.send_message(
+                    chat_id,
+                    f"⚠️ Attachment not found: {attachment_rel}",
+                )
+                return
+
+            payload = await fetch_bytes(attachment_rel)
+            if payload is None:
+                await bot.send_message(
+                    chat_id,
+                    f"⚠️ Attachment not found: {attachment_rel}",
+                )
+                return
+
+            in_memory_attachment = BytesIO(payload)
+            filename = Path(attachment_rel).name or "attachment"
+            in_memory_attachment.name = filename
+            await self._send_attachment_file(
                 chat_id,
-                f"⚠️ Attachment not found: {attachment_rel}",
+                bot,
+                attachment_rel,
+                in_memory_attachment,
+                filename,
+                source_note_dt,
             )
             return
 
-        suffix = attachment_path.suffix.lower()
         try:
-            with attachment_path.open("rb") as attachment_file:
-                if suffix in PHOTO_EXTENSIONS:
-                    sent = await bot.send_photo(chat_id, attachment_file)
-                elif suffix in VIDEO_EXTENSIONS:
-                    sent = await bot.send_video(chat_id, attachment_file)
-                elif suffix in VOICE_EXTENSIONS:
-                    sent = await bot.send_voice(chat_id, attachment_file)
-                else:
-                    sent = await bot.send_document(chat_id, attachment_file)
+            with attachment_path.open("rb") as opened_attachment:
+                await self._send_attachment_file(
+                    chat_id,
+                    bot,
+                    attachment_rel,
+                    opened_attachment,
+                    attachment_path.name,
+                    source_note_dt,
+                )
+        except OSError:
+            self._logger.exception("Failed to open attachment %s", attachment_rel)
+            await bot.send_message(
+                chat_id,
+                f"⚠️ Failed to send attachment: {attachment_rel}",
+            )
 
-                if source_note_dt is not None:
-                    self._track_reply_source_message(chat_id, sent, source_note_dt)
+    async def _send_attachment_file(
+        self,
+        chat_id: int,
+        bot: Any,
+        attachment_rel: str,
+        attachment_file: Any,
+        attachment_name: str,
+        source_note_dt: datetime | None,
+    ) -> None:
+        """Send one opened attachment object using extension-based media API."""
+        suffix = Path(attachment_name).suffix.lower()
+
+        try:
+            if suffix in PHOTO_EXTENSIONS:
+                sent = await bot.send_photo(chat_id, attachment_file)
+            elif suffix in VIDEO_EXTENSIONS:
+                sent = await bot.send_video(chat_id, attachment_file)
+            elif suffix in VOICE_EXTENSIONS:
+                sent = await bot.send_voice(chat_id, attachment_file)
+            else:
+                sent = await bot.send_document(chat_id, attachment_file)
+
+            if source_note_dt is not None:
+                self._track_reply_source_message(chat_id, sent, source_note_dt)
         except (OSError, TelegramError):
             self._logger.exception("Failed to send attachment %s", attachment_rel)
             await bot.send_message(

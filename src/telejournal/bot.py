@@ -49,7 +49,7 @@ from telejournal.runtime_config import (
     format_runtime_config_summary,
     persist_runtime_settings,
 )
-from telejournal.storage import VaultRepository
+from telejournal.storage import build_repository
 
 __all__ = ["JournalBot"]
 
@@ -93,10 +93,7 @@ class JournalBot:
     def __init__(self, settings: Settings) -> None:
         """Create bot services from runtime settings."""
         self._settings = settings
-        self._repository = VaultRepository(
-            settings.vault_root,
-            secure_permissions=settings.secure_file_permissions,
-        )
+        self._repository = build_repository(settings)
         self._reply_source_notes: dict[int, dict[int, datetime]] = {}
         self._note_delivery = NoteDeliveryService(
             repository_provider=lambda: self._repository,
@@ -1281,3 +1278,14 @@ class JournalBot:
                 time=self._settings.daily_brief_time_utc,
                 name=DAILY_BRIEF_JOB_NAME,
             )
+
+    async def shutdown(self) -> None:
+        """Best-effort shutdown hook used to flush pending repository writes."""
+        flush_pending = getattr(self._repository, "flush_pending", None)
+        if not callable(flush_pending):
+            return
+
+        try:
+            await flush_pending(reason="shutdown")
+        except Exception:
+            LOGGER.exception("Failed to flush pending storage writes during shutdown")

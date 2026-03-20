@@ -5,7 +5,9 @@
 [![Lint](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml/badge.svg)](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml)
 # Telegram Journal Bot
 
-A Telegram bot that journals every private message into your Obsidian daily notes.
+**Capture thoughts on Telegram, persist them in Obsidian or GitHub, and never lose a moment again.**
+
+Telejournal is a bot that journals every private message into daily markdown notes, persisting to either a local Obsidian vault or a GitHub repository. Designed for personal journaling and private note-taking with rich media support.
 
 ## Demo
 User messages sent in a private chat are captured by the bot, including text and media.
@@ -21,6 +23,9 @@ Captured content is appended to your daily note with timestamped entries and str
 - Private chat journal capture for text, photos, voice recordings, video messages (including circular video notes), and locations
 - UTC daily note partitioning at `YYYY/YYYY-MM-DD.md`
 - Media storage (photos, voice, video) in `YYYY/attachments/`
+- Pluggable storage providers:
+  - `obsidian_vault` (filesystem)
+  - `github_repo` (GitHub repository via REST API)
 - YAML frontmatter management for `mood`, `tags`, and `created`
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
@@ -75,7 +80,7 @@ telejournal run --verbose
 4. Send a normal message (for example, `First journal entry`) and confirm it appears in:
 
 ```text
-<VAULT_ROOT>/YYYY/YYYY-MM-DD.md
+<STORAGE_ROOT>/YYYY/YYYY-MM-DD.md
 ```
 
 ### Run Modes
@@ -100,12 +105,34 @@ CLI overrides (highest priority):
 ```bash
 telejournal run \
   --telegram-token your_token \
-  --vault-root /path/to/vault \
+  --storage-provider obsidian_vault \
+  --obsidian-vault-root /path/to/vault \
   --allowed-user-ids 123456,987654 \
   --message-timestamp-window-seconds 60 \
   --daily-brief-time-utc 09:00 \
-  --secure-file-permissions
+  --obsidian-vault-secure-file-permissions
 ```
+
+GitHub storage provider example:
+
+```bash
+telejournal run \
+  --telegram-token your_token \
+  --storage-provider github_repo \
+  --github-owner your-org \
+  --github-repo your-journal-repo \
+  --github-branch main \
+  --github-batch-window-seconds 60 \
+  --github-token ghp_or_github_pat_token \
+  --allowed-user-ids 123456,987654
+```
+
+When using `github_repo`, note writes and media uploads are queued in-memory and
+flushed in burst commits every `batch_window_seconds` (default: `60`). Bot
+feedback remains immediate, while GitHub API traffic is reduced.
+
+During shutdown, telejournal performs a best-effort final flush of queued
+GitHub writes (for example, when receiving SIGTERM in container stop flows).
 
 ### Telegram Commands
 
@@ -150,19 +177,35 @@ Create a `.env` file:
 
 ```env
 TELEGRAM_TOKEN=your_bot_token
-VAULT_ROOT=/path/to/obsidian/vault
 LOG_LEVEL=INFO
 TELEGRAM_ALLOWED_USER_IDS=123456,987654
+STORAGE_PROVIDER=obsidian_vault
+STORAGE_OBSIDIAN_VAULT_ROOT=/path/to/obsidian/vault
 ```
 
 ### Optional Environment Variables
 
 - `MESSAGE_TIMESTAMP_WINDOW_SECONDS` (default: `60`) - Messages within this window share the same timestamp
-- `SECURE_FILE_PERMISSIONS` (default: `true`) - Set restrictive permissions (0o700/0o600) on vault directories and files for security. Set to `false` only if you need broader file access.
+- `STORAGE_OBSIDIAN_VAULT_SECURE_FILE_PERMISSIONS` (default: `true`) - Set restrictive permissions (0o700/0o600) on vault directories and files for security. Applies only to `obsidian_vault` provider.
 - `DAILY_BRIEF_TIME_UTC` (default: `09:00`) - Daily UTC time for historical same-day brief (`HH:MM` or `HH:MM:SS`). Set to `0` to disable.
 - `TAG_CHOICES` (default: `family,health,love,hobby,other,finance,social`) - Comma-separated tag choices used by inline tag buttons.
 - `PROMPT_FOR_MOOD_IF_MISSING` (default: `true`) - Enable/disable automatic mood prompts after entry writes and timer checks.
 - `BOT_MENU_ENABLED` (default: `true`) - Enable/disable Telegram command menu publishing at startup. When disabled, the bot removes its command menu.
+- GitHub provider variables:
+  - `STORAGE_GITHUB_OWNER`
+  - `STORAGE_GITHUB_REPO`
+  - `STORAGE_GITHUB_BRANCH` (default: `main`)
+  - `STORAGE_GITHUB_TOKEN` (required for `github_repo`)
+  - `STORAGE_GITHUB_PATH_PREFIX` (optional)
+  - `STORAGE_GITHUB_API_BASE_URL` (default: `https://api.github.com`)
+  - `STORAGE_GITHUB_BATCH_WINDOW_SECONDS` (default: `60`)
+
+For `github_repo`, use a fine-grained personal access token scoped to exactly one target repository, with `Contents` read/write permissions.
+
+At startup, telejournal attempts to detect repository visibility and logs a warning if the configured repository is public.
+
+For troubleshooting GitHub batching, set `LOG_LEVEL=DEBUG` to inspect queue and
+flush activity (queue size, flush cycle, and retry logs).
 
 ## Configuration
 
@@ -185,13 +228,24 @@ You can provide a `config.yaml` file for more organized configuration management
 
 ```yaml
 telegram_token: "${TELEGRAM_TOKEN}"  # Supports environment variable expansion
-vault_root: /path/to/obsidian/vault
 allowed_user_ids:
   - 123456
   - 987654
+storage:
+  provider: obsidian_vault # obsidian_vault or github_repo
+  obsidian_vault:
+    root: /path/to/obsidian/vault
+    secure_file_permissions: true
+  github_repo:
+    owner: your-org
+    repo: your-journal-repo
+    branch: main
+    token: "${STORAGE_GITHUB_TOKEN}"
+    path_prefix: ""
+    api_base_url: https://api.github.com
+    batch_window_seconds: 60
 log_level: INFO
 message_timestamp_window_seconds: 60
-secure_file_permissions: true
 daily_brief_time_utc: "0"
 tag_choices: ["family", "health", "love", "hobby", "other", "finance", "social"]
 prompt_for_mood_if_missing: true
@@ -201,11 +255,20 @@ bot_menu_enabled: true
 **Configuration Keys:**
 
 - `telegram_token` (required) - Your Telegram bot token
-- `vault_root` (required) - Absolute path to your Obsidian vault
 - `allowed_user_ids` (required) - List of Telegram user IDs that can use the bot
+- `storage` (required) - Hierarchical storage provider configuration
+  - `storage.provider` - `obsidian_vault` or `github_repo`
+  - `storage.obsidian_vault.root` - Filesystem root for vault storage
+  - `storage.obsidian_vault.secure_file_permissions` - Restrictive perms toggle for vault storage
+  - `storage.github_repo.owner` - GitHub owner/org
+  - `storage.github_repo.repo` - GitHub repo name
+  - `storage.github_repo.branch` - Branch for writes (default `main`)
+  - `storage.github_repo.token` - Fine-grained token scoped to the target repo with Contents read/write
+  - `storage.github_repo.path_prefix` - Optional sub-folder inside the repository
+  - `storage.github_repo.api_base_url` - API base URL (default `https://api.github.com`)
+  - `storage.github_repo.batch_window_seconds` - In-memory queue flush window in seconds (default `60`)
 - `log_level` (optional, default: `INFO`) - Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `message_timestamp_window_seconds` (optional, default: `60`) - Messages within this window share the same timestamp
-- `secure_file_permissions` (optional, default: `true`) - Set restrictive file permissions for security
 - `daily_brief_time_utc` (optional, default: `09:00`) - Daily UTC time for the historical same-day brief (`HH:MM` or `HH:MM:SS`), or `0` to disable
 - `tag_choices` (optional, default: `family,health,love,hobby,other,finance,social`) - List of inline tag button choices
 - `prompt_for_mood_if_missing` (optional, default: `true`) - Enable/disable mood prompts when entries exist without mood
@@ -217,7 +280,10 @@ YAML configuration supports `${VAR_NAME}` syntax for environment variable expans
 
 ```yaml
 telegram_token: "${TELEGRAM_TOKEN}"
-vault_root: "${VAULT_ROOT}"
+storage:
+  provider: obsidian_vault
+  obsidian_vault:
+    root: "${STORAGE_OBSIDIAN_VAULT_ROOT}"
 ```
 
 This allows you to keep sensitive values in environment variables while using a configuration file for other settings.
@@ -241,10 +307,11 @@ You can run the bot in Docker using either `docker run` or `docker compose`.
 
     ```env
     TELEGRAM_TOKEN=your_bot_token
-    VAULT_ROOT=/data
+    STORAGE_PROVIDER=obsidian_vault
+    STORAGE_OBSIDIAN_VAULT_ROOT=/data
     LOG_LEVEL=INFO
     TELEGRAM_ALLOWED_USER_IDS=123456,987654
-    SECURE_FILE_PERMISSIONS=false # This will avoid permission issues when running as non-root, but use with caution! 
+    STORAGE_OBSIDIAN_VAULT_SECURE_FILE_PERMISSIONS=false # This will avoid permission issues when running as non-root, but use with caution!
     ```
 
 2. Create an `obsidian-journal` directory in the same location as your `docker-compose.yml` to serve as your vault, and set permissions so the container can write to it:

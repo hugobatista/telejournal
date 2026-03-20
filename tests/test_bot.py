@@ -141,6 +141,51 @@ def _context(
     )
 
 
+@pytest.mark.asyncio
+async def test_shutdown_flushes_pending_repository_writes(
+    journal_bot: JournalBot,
+) -> None:
+    """Shutdown should flush pending writes when repository exposes flush hook."""
+    flush_pending = AsyncMock()
+    journal_bot._repository.flush_pending = flush_pending  # type: ignore[attr-defined]
+
+    await journal_bot.shutdown()
+
+    flush_pending.assert_awaited_once_with(reason="shutdown")
+
+
+@pytest.mark.asyncio
+async def test_shutdown_without_flush_hook_returns(journal_bot: JournalBot) -> None:
+    """Shutdown should no-op safely when provider has no pending-flush hook."""
+    if hasattr(journal_bot._repository, "flush_pending"):
+        delattr(journal_bot._repository, "flush_pending")
+
+    await journal_bot.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_logs_flush_failures(
+    journal_bot: JournalBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shutdown should swallow and log flush exceptions."""
+    errors: list[str] = []
+
+    async def _raise_flush(*, reason: str) -> None:
+        del reason
+        raise RuntimeError("boom")
+
+    journal_bot._repository.flush_pending = _raise_flush  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        "telejournal.bot.LOGGER.exception",
+        lambda message: errors.append(message),
+    )
+
+    await journal_bot.shutdown()
+
+    assert any("Failed to flush pending storage writes" in item for item in errors)
+
+
 def _private_update(
     *,
     user_id: int = 1,

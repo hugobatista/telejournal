@@ -1,9 +1,20 @@
 telegram_token: "${TELEGRAM_TOKEN}"
-vault_root: /data
 allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
+storage:
+	provider: obsidian_vault # obsidian_vault or github_repo
+	obsidian_vault:
+		root: /data
+		secure_file_permissions: true
+	github_repo:
+		owner: your-github-owner
+		repo: your-journal-repo
+		branch: main
+		token: "${STORAGE_GITHUB_TOKEN}"
+		path_prefix: "" # Optional sub-folder inside the repo
+		api_base_url: https://api.github.com
+		batch_window_seconds: 60 # Queue writes in memory and flush in bursts
 log_level: INFO
 message_timestamp_window_seconds: 60
-secure_file_permissions: true
 daily_brief_time_utc: "0" # Set to "0" to disable, or specify time in "HH:MM" or "HH:MM:SS" format
 tag_choices: ["family", "health", "love", "hobby", "other", "finance", "social"]
 prompt_for_mood_if_missing: true

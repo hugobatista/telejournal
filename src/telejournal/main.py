@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import getpass
 import inspect
 import shutil
@@ -41,21 +42,47 @@ def _resolve_run_config_path(config_path: Path | None) -> Path | None:
 
 def _build_cli_overrides(
     telegram_token: str | None,
-    vault_root: Path | None,
+    storage_provider: str | None,
+    obsidian_vault_root: Path | None,
+    obsidian_vault_secure_file_permissions: bool | None,
+    github_owner: str | None,
+    github_repo: str | None,
+    github_branch: str | None,
+    github_token: str | None,
+    github_path_prefix: str | None,
+    github_api_base_url: str | None,
+    github_batch_window_seconds: int | None,
     allowed_user_ids: str | None,
     log_level: str | None,
     message_timestamp_window_seconds: int | None,
-    secure_file_permissions: bool | None,
     daily_brief_time_utc: str | None,
 ) -> dict[str, Any]:
     """Build CLI override mapping from run command arguments."""
     return {
         "telegram_token": telegram_token,
-        "vault_root": str(vault_root) if vault_root is not None else None,
+        "storage": {
+            "provider": storage_provider,
+            "obsidian_vault": {
+                "root": (
+                    str(obsidian_vault_root)
+                    if obsidian_vault_root is not None
+                    else None
+                ),
+                "secure_file_permissions": (obsidian_vault_secure_file_permissions),
+            },
+            "github_repo": {
+                "owner": github_owner,
+                "repo": github_repo,
+                "branch": github_branch,
+                "token": github_token,
+                "path_prefix": github_path_prefix,
+                "api_base_url": github_api_base_url,
+                "batch_window_seconds": github_batch_window_seconds,
+            },
+        },
         "allowed_user_ids": allowed_user_ids,
         "log_level": log_level,
         "message_timestamp_window_seconds": message_timestamp_window_seconds,
-        "secure_file_permissions": secure_file_permissions,
         "daily_brief_time_utc": daily_brief_time_utc,
     }
 
@@ -147,7 +174,12 @@ def _start_bot(telegram_token: str, settings: Settings) -> None:
         raise RuntimeError("Job queue is unavailable; install job-queue extras")
     journal_bot.register_jobs(app_instance.job_queue)
 
-    app_instance.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        app_instance.run_polling(allowed_updates=Update.ALL_TYPES)
+    finally:
+        # Best-effort durability: flush queued storage writes before process exits
+        # (for example, SIGTERM during container shutdown).
+        asyncio.run(journal_bot.shutdown())
 
 
 def _get_current_user() -> str:
@@ -222,14 +254,66 @@ def run_command(
         "--telegram-token",
         help="Telegram bot token.",
     ),
-    vault_root: Path | None = typer.Option(
+    storage_provider: str | None = typer.Option(
         None,
-        "--vault-root",
+        "--storage-provider",
+        help="Storage provider: obsidian_vault or github_repo.",
+    ),
+    obsidian_vault_root: Path | None = typer.Option(
+        None,
+        "--obsidian-vault-root",
         file_okay=False,
         dir_okay=True,
         writable=True,
         resolve_path=False,
-        help="Root of your Obsidian vault.",
+        help="Root path for obsidian_vault storage provider.",
+    ),
+    obsidian_vault_secure_file_permissions: bool | None = typer.Option(
+        None,
+        "--obsidian-vault-secure-file-permissions/"
+        "--no-obsidian-vault-secure-file-permissions",
+        help=(
+            "Enable restrictive permissions (0o700/0o600) for "
+            "obsidian_vault storage files and directories."
+        ),
+    ),
+    github_owner: str | None = typer.Option(
+        None,
+        "--github-owner",
+        help="GitHub owner for github_repo storage provider.",
+    ),
+    github_repo: str | None = typer.Option(
+        None,
+        "--github-repo",
+        help="GitHub repository name for github_repo storage provider.",
+    ),
+    github_branch: str | None = typer.Option(
+        None,
+        "--github-branch",
+        help="Git branch used by github_repo storage provider.",
+    ),
+    github_token: str | None = typer.Option(
+        None,
+        "--github-token",
+        help="GitHub token for github_repo storage provider.",
+    ),
+    github_path_prefix: str | None = typer.Option(
+        None,
+        "--github-path-prefix",
+        help="Optional repository sub-path where journal files are stored.",
+    ),
+    github_api_base_url: str | None = typer.Option(
+        None,
+        "--github-api-base-url",
+        help="GitHub API base URL (defaults to https://api.github.com).",
+    ),
+    github_batch_window_seconds: int | None = typer.Option(
+        None,
+        "--github-batch-window-seconds",
+        help=(
+            "Flush pending github_repo writes in bursts every N seconds "
+            "(default: 60)."
+        ),
     ),
     allowed_user_ids: str | None = typer.Option(
         None,
@@ -245,11 +329,6 @@ def run_command(
         None,
         "--message-timestamp-window-seconds",
         help="Message grouping window in seconds.",
-    ),
-    secure_file_permissions: bool | None = typer.Option(
-        None,
-        "--secure-file-permissions/--no-secure-file-permissions",
-        help="Enable secure file permissions for created files and dirs.",
     ),
     daily_brief_time_utc: str | None = typer.Option(
         None,
@@ -272,11 +351,19 @@ def run_command(
     resolved_config = _resolve_run_config_path(config)
     cli_overrides = _build_cli_overrides(
         telegram_token,
-        vault_root,
+        storage_provider,
+        obsidian_vault_root,
+        obsidian_vault_secure_file_permissions,
+        github_owner,
+        github_repo,
+        github_branch,
+        github_token,
+        github_path_prefix,
+        github_api_base_url,
+        github_batch_window_seconds,
         allowed_user_ids,
         log_level,
         message_timestamp_window_seconds,
-        secure_file_permissions,
         daily_brief_time_utc,
     )
 
@@ -292,7 +379,21 @@ def run_command(
     setup_logging(settings.log_level, verbose=verbose)
     if verbose:
         output.info(f"Telejournal v{__version__} starting", echo=True)
-        output.info(f"Vault root: {settings.vault_root}", echo=True)
+        if settings.storage_provider == "obsidian_vault":
+            output.info(f"Storage: obsidian_vault ({settings.vault_root})", echo=True)
+        else:
+            output.info(
+                (
+                    "Storage: github_repo "
+                    f"({settings.github_owner}/{settings.github_repo}"
+                    f"@{settings.github_branch})"
+                ),
+                echo=True,
+            )
+            output.info(
+                ("GitHub batch window: " f"{settings.github_batch_window_seconds}s"),
+                echo=True,
+            )
         output.info(f"Log level: {settings.log_level}", echo=True)
 
     _start_bot(settings.telegram_token, settings)

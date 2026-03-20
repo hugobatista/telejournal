@@ -77,13 +77,35 @@ def _serialize_settings_for_yaml(settings: Settings) -> dict[str, Any]:
     if settings.daily_brief_time_utc is not None:
         daily_brief_raw = settings.daily_brief_time_utc.strftime("%H:%M:%S")
 
+    storage_payload: dict[str, Any]
+    if settings.storage_provider == "github_repo":
+        storage_payload = {
+            "provider": "github_repo",
+            "github_repo": {
+                "owner": settings.github_owner,
+                "repo": settings.github_repo,
+                "branch": settings.github_branch,
+                "token": settings.github_token,
+                "path_prefix": settings.github_path_prefix,
+                "api_base_url": settings.github_api_base_url,
+                "batch_window_seconds": settings.github_batch_window_seconds,
+            },
+        }
+    else:
+        storage_payload = {
+            "provider": "obsidian_vault",
+            "obsidian_vault": {
+                "root": str(settings.vault_root),
+                "secure_file_permissions": settings.secure_file_permissions,
+            },
+        }
+
     return {
         "telegram_token": settings.telegram_token,
-        "vault_root": str(settings.vault_root),
         "allowed_user_ids": sorted(settings.allowed_user_ids),
+        "storage": storage_payload,
         "log_level": settings.log_level,
         "message_timestamp_window_seconds": settings.message_timestamp_window_seconds,
-        "secure_file_permissions": settings.secure_file_permissions,
         "daily_brief_time_utc": daily_brief_raw,
         "tag_choices": list(settings.tag_choices),
         "prompt_for_mood_if_missing": settings.prompt_for_mood_if_missing,

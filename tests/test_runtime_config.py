@@ -112,7 +112,8 @@ def test_persist_runtime_settings_creates_default_config_when_missing(
 
     payload = yaml.safe_load(target_path.read_text(encoding="utf-8"))
     assert payload["telegram_token"] == "token"
-    assert payload["vault_root"] == str((tmp_path / "vault"))
+    assert payload["storage"]["provider"] == "obsidian_vault"
+    assert payload["storage"]["obsidian_vault"]["root"] == str((tmp_path / "vault"))
     assert payload["allowed_user_ids"] == [1, 3]
     assert payload["tag_choices"] == ["family", "focus"]
     assert payload["prompt_for_mood_if_missing"] is True
@@ -158,3 +159,33 @@ def test_persist_runtime_settings_handles_relative_config_path(
     assert backup_path is None
     assert target_path == (tmp_path / "nested" / "config.yaml").resolve()
     assert persisted.config_path == target_path
+
+
+def test_persist_runtime_settings_serializes_github_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persistence should keep github storage configuration hierarchy."""
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(
+        telegram_token="token",
+        vault_root=tmp_path,
+        allowed_user_ids={1},
+        storage_provider="github_repo",
+        github_owner="acme",
+        github_repo="journal",
+        github_token="token",
+        github_branch="dev",
+        github_path_prefix="notes",
+        github_api_base_url="https://api.github.com",
+        github_batch_window_seconds=180,
+    )
+
+    _persisted, target_path, _backup_path = persist_runtime_settings(settings)
+    payload = yaml.safe_load(target_path.read_text(encoding="utf-8"))
+
+    assert payload["storage"]["provider"] == "github_repo"
+    assert payload["storage"]["github_repo"]["owner"] == "acme"
+    assert payload["storage"]["github_repo"]["repo"] == "journal"
+    assert payload["storage"]["github_repo"]["token"] == "token"
+    assert payload["storage"]["github_repo"]["batch_window_seconds"] == 180

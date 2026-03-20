@@ -12,3 +12,4 @@ py.typed
 .env.docker
 obsidian-journal/
 obsidian-journal-dev/
+config.yaml
