@@ -12,6 +12,7 @@ from telejournal.formatting import (
     TG_ENTRY_END_TOKEN,
     TG_ENTRY_START_TOKEN,
     TextChunk,
+    format_timestamp_as_prefixed_quote,
     marker_end_comment,
     marker_start_comment,
     extract_reply_quote,
@@ -298,6 +299,45 @@ def test_marker_tokens_are_stable() -> None:
     """Marker tokens should remain explicit and stable for compatibility."""
     assert TG_ENTRY_START_TOKEN == "tg-entry-start"
     assert TG_ENTRY_END_TOKEN == "tg-entry-end"
+
+
+def test_format_timestamp_as_prefixed_quote_with_seconds() -> None:
+    """Timestamps should be extracted and formatted with > prefix."""
+    content = "Entry at %% 09:35:05 %% today."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "Entry at >09:35:05 today."
+
+
+def test_format_timestamp_as_prefixed_quote_without_seconds() -> None:
+    """Timestamps without seconds should also be formatted with > prefix."""
+    content = "Started %% 14:30 %% in the morning."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "Started >14:30 in the morning."
+
+
+def test_format_timestamp_as_prefixed_quote_multiple() -> None:
+    """Multiple timestamps in content should all use > prefix."""
+    content = "First %% 09:00:00 %% then %% 10:30 %% and %% 15:45:30 %%."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "First >09:00:00 then >10:30 and >15:45:30."
+
+
+def test_format_timestamp_as_prefixed_quote_with_extra_spaces() -> None:
+    """Timestamps with extra spaces should still be formatted correctly."""
+    content = "Time:  %%  11:22:33  %%  here."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "Time:  >11:22:33  here."
+
+
+def test_parse_note_render_payload_formats_timestamps() -> None:
+    """Render payload parsing should format timestamps with > prefix."""
+    content = "Entry at %% 13:45:00 %%\ntext content"
+    payload = parse_note_render_payload(content)
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="Entry at >13:45:00\ntext content"),
+        ]
+    )
 
 
 def test_format_with_quote_empty_lines() -> None:

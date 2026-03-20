@@ -26,6 +26,7 @@ Captured content is appended to your daily note with timestamped entries and str
 - Date override commands (`/setdate`, `/resetdate`)
 - Tags and mood management with inline keyboard callbacks
 - `/show` asks whether to show note text only or rendered (text + embedded attachments)
+- Displayed note timestamps are normalized from `%% HH:MM:SS %%` markers to `>HH:MM:SS` for cleaner chat output
 - Daily UTC "on this day" brief sends a years summary and asks whether to show history as notes only or rendered
 - Replies to historical bot messages can include a quote plus a clickable source-note link back to the original daily note
 - Edited text messages update their original journal entry in place instead of creating a duplicate

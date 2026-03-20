@@ -24,6 +24,7 @@ _EMBED_RE = re.compile(r"!\[\[(?P<target>[^\]]+)\]\]")
 _INTERNAL_TG_ENTRY_MARKER_RE = re.compile(
     rf"(?m)^<!-- (?:{TG_ENTRY_START_TOKEN}|{TG_ENTRY_END_TOKEN}):[^>]+ -->\n?"
 )
+_TIMESTAMP_MARKER_RE = re.compile(r"%%\s*(?P<time>\d{2}:\d{2}(?::\d{2})?)\s*%%")
 
 
 @dataclass(frozen=True)
@@ -54,11 +55,12 @@ def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
     attachment chunks while preserving surrounding text in separate chunks.
     """
     sanitized_content = strip_internal_tracking_markers(note_content)
+    formatted_content = format_timestamp_as_prefixed_quote(sanitized_content)
     chunks: list[TextChunk | AttachmentChunk] = []
     cursor = 0
 
-    for match in _EMBED_RE.finditer(sanitized_content):
-        before = sanitized_content[cursor : match.start()]
+    for match in _EMBED_RE.finditer(formatted_content):
+        before = formatted_content[cursor : match.start()]
         if before:
             chunks.append(TextChunk(text=before))
 
@@ -71,7 +73,7 @@ def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
 
         cursor = match.end()
 
-    tail = sanitized_content[cursor:]
+    tail = formatted_content[cursor:]
     if tail:
         chunks.append(TextChunk(text=tail))
 
@@ -106,6 +108,19 @@ def wrap_body_with_marker(body: str, marker: str) -> str:
         f"{clean_body}\n"
         f"{marker_end_comment(marker)}"
     )
+
+
+def format_timestamp_as_prefixed_quote(content: str) -> str:
+    """Replace timestamp markers with >-prefixed time format.
+
+    Transforms ``%% HH:MM:SS %%`` to ``>HH:MM:SS`` for user display.
+    """
+
+    def _replace_with_quote_prefix(match: re.Match[str]) -> str:
+        time_str = match.group("time")
+        return f">{time_str}"
+
+    return _TIMESTAMP_MARKER_RE.sub(_replace_with_quote_prefix, content)
 
 
 def extract_mood_value(raw_mood: Any) -> int | None:
