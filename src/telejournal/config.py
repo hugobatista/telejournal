@@ -34,6 +34,7 @@ class Settings:
     daily_brief_time_utc: time | None = None
     tag_choices: tuple[str, ...] = DEFAULT_TAG_CHOICES
     prompt_for_mood_if_missing: bool = True
+    bot_menu_enabled: bool = True
     config_path: Path | None = None
 
 
@@ -44,6 +45,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "daily_brief_time_utc": "09:00",
     "tag_choices": list(DEFAULT_TAG_CHOICES),
     "prompt_for_mood_if_missing": True,
+    "bot_menu_enabled": True,
 }
 
 _TAG_CHOICE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -208,6 +210,7 @@ def load_settings(
     prompt_for_mood_if_missing = _parse_bool(
         merged.get("prompt_for_mood_if_missing", True)
     )
+    bot_menu_enabled = _parse_bool(merged.get("bot_menu_enabled", True))
 
     return Settings(
         telegram_token=token,
@@ -219,5 +222,6 @@ def load_settings(
         daily_brief_time_utc=daily_brief_time_utc,
         tag_choices=tag_choices,
         prompt_for_mood_if_missing=prompt_for_mood_if_missing,
+        bot_menu_enabled=bot_menu_enabled,
         config_path=yaml_path,
     )

@@ -78,5 +78,9 @@ def load_env_config() -> dict[str, Any]:
     if prompt_for_mood_if_missing:
         config["prompt_for_mood_if_missing"] = prompt_for_mood_if_missing
 
+    bot_menu_enabled = os.getenv("BOT_MENU_ENABLED", "").strip()
+    if bot_menu_enabled:
+        config["bot_menu_enabled"] = bot_menu_enabled
+
     expanded = expand_env_vars(config)
     return cast(dict[str, Any], expanded)

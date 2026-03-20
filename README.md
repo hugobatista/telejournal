@@ -29,8 +29,8 @@ Captured content is appended to your daily note with timestamped entries and str
 - Daily UTC "on this day" brief sends a years summary and asks whether to show history as notes only or rendered
 - Replies to historical bot messages can include a quote plus a clickable source-note link back to the original daily note
 - Edited text messages update their original journal entry in place instead of creating a duplicate
-- Guided `/config` command for runtime updates of tag choices, daily brief time, and mood prompt toggle
-- `/config` updates are persisted to YAML so values survive bot restarts (existing config files are backed up before overwrite)
+- Guided `/settings` command for runtime updates of tag choices, daily brief time, mood prompt toggle, and bot menu visibility
+- `/settings` updates are persisted to YAML so values survive bot restarts (existing config files are backed up before overwrite)
 
 ## Usage
 
@@ -111,7 +111,8 @@ telejournal run \
 After the bot is running, these commands are available in your private chat:
 
 - `/help` Show bot usage summary
-- `/setdate YYYY-MM-DD [HH:MM:SS]` Set target note date/time
+- `/setdate` Start a guided date selection flow
+- `/setdate YYYY-MM-DD [HH:MM:SS]` Set target note date/time directly
 - `/resetdate` Return to current day
 - `/tags` Show tag buttons
 - `/tags work kids` Add/select one or more tags
@@ -121,7 +122,7 @@ After the bot is running, these commands are available in your private chat:
 - `/todayinhistory` Show same-day note years and choose notes only or rendered output
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
-- `/config` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, and `prompt_for_mood_if_missing`
+- `/settings` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, `prompt_for_mood_if_missing`, and `bot_menu_enabled`
   - Changes are persisted immediately.
   - If the bot started from a YAML config file, that file is backed up and updated.
   - If no YAML config was used, `./config.yaml` is created/updated.
@@ -160,6 +161,7 @@ TELEGRAM_ALLOWED_USER_IDS=123456,987654
 - `DAILY_BRIEF_TIME_UTC` (default: `09:00`) - Daily UTC time for historical same-day brief (`HH:MM` or `HH:MM:SS`). Set to `0` to disable.
 - `TAG_CHOICES` (default: `family,health,love,hobby,other,finance,social`) - Comma-separated tag choices used by inline tag buttons.
 - `PROMPT_FOR_MOOD_IF_MISSING` (default: `true`) - Enable/disable automatic mood prompts after entry writes and timer checks.
+- `BOT_MENU_ENABLED` (default: `true`) - Enable/disable Telegram command menu publishing at startup. When disabled, the bot removes its command menu.
 
 ## Configuration
 
@@ -192,6 +194,7 @@ secure_file_permissions: true
 daily_brief_time_utc: "0"
 tag_choices: ["family", "health", "love", "hobby", "other", "finance", "social"]
 prompt_for_mood_if_missing: true
+bot_menu_enabled: true
 ```
 
 **Configuration Keys:**
@@ -205,6 +208,7 @@ prompt_for_mood_if_missing: true
 - `daily_brief_time_utc` (optional, default: `09:00`) - Daily UTC time for the historical same-day brief (`HH:MM` or `HH:MM:SS`), or `0` to disable
 - `tag_choices` (optional, default: `family,health,love,hobby,other,finance,social`) - List of inline tag button choices
 - `prompt_for_mood_if_missing` (optional, default: `true`) - Enable/disable mood prompts when entries exist without mood
+- `bot_menu_enabled` (optional, default: `true`) - Enable/disable Telegram command menu publishing at startup
 
 **Environment Variable Expansion:**
 

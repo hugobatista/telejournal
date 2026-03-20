@@ -85,7 +85,7 @@ class CommandHandlerService:
             "/todayinhistory  Show same-day notes from previous years\n"
             "/delete  Delete last entry and show deleted content\n"
             "/delete day [YYYY-MM-DD]  Delete full day note\n"
-            "/config  Guided runtime configuration\n"
+            "/settings  Guided runtime configuration\n"
             "/help"
         )
 
@@ -297,7 +297,7 @@ class CommandHandlerService:
                 reply_markup=_tags_keyboard(current_tags, self._settings().tag_choices),
             )
 
-    async def config_command(
+    async def settings_command(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,

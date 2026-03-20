@@ -39,7 +39,7 @@ class CallbackRouterService:
         apply_runtime_config: Callable[[str, Any, ContextTypes.DEFAULT_TYPE], str],
         config_summary: Callable[[], str],
         config_keyboard: Callable[[], Any],
-        config_prompt_bool_keyboard: Callable[[], Any],
+        config_prompt_bool_keyboard: Callable[[str], Any],
         config_confirm_keyboard: Callable[[], Any],
         chat_id_resolver: Callable[[Update], int | None],
         send_note_text_only: Callable[..., Any],
@@ -122,7 +122,7 @@ class CallbackRouterService:
         context: ContextTypes.DEFAULT_TYPE,
         chat_data: dict[str, Any],
     ) -> None:
-        """Handle guided /config callback interactions."""
+        """Handle guided /settings callback interactions."""
         parts = query.data.split(":")
         if len(parts) < 2:  # pragma: no cover
             return
@@ -155,29 +155,32 @@ class CallbackRouterService:
                 )
                 return
 
-            if key == "prompt_for_mood_if_missing":
+            if key in {"prompt_for_mood_if_missing", "bot_menu_enabled"}:
                 chat_data[self._config_flow_key] = {"state": "await_prompt_button"}
                 chat_data.pop(self._config_pending_key, None)
                 await query.edit_message_text(
                     "Choose the new boolean value:",
-                    reply_markup=self._config_prompt_bool_keyboard(),
+                    reply_markup=self._config_prompt_bool_keyboard(key),
                 )
                 return
             return
 
-        if action == "set_prompt" and len(parts) == 3:
-            raw_value = parts[2].strip().lower()
+        if action == "set_bool" and len(parts) == 4:
+            pending_key = parts[2].strip()
+            if pending_key not in {"prompt_for_mood_if_missing", "bot_menu_enabled"}:
+                return
+
+            raw_value = parts[3].strip().lower()
             if raw_value not in {"true", "false"}:
                 return
             value = raw_value == "true"
             chat_data[self._config_pending_key] = {
-                "key": "prompt_for_mood_if_missing",
+                "key": pending_key,
                 "value": value,
             }
             chat_data[self._config_flow_key] = {"state": "await_confirm"}
             await query.edit_message_text(
-                "Apply prompt_for_mood_if_missing = "
-                f"{'true' if value else 'false'}?",
+                f"Apply {pending_key} = " f"{'true' if value else 'false'}?",
                 reply_markup=self._config_confirm_keyboard(),
             )
             return
@@ -186,7 +189,7 @@ class CallbackRouterService:
             pending = chat_data.get(self._config_pending_key)
             if not isinstance(pending, dict):
                 await query.edit_message_text(
-                    "No pending config update. Use /config.",
+                    "No pending config update. Use /settings.",
                 )
                 return
 
@@ -194,7 +197,7 @@ class CallbackRouterService:
             pending_raw_value = pending.get("value")
             if not isinstance(pending_key, str):
                 await query.edit_message_text(
-                    "Invalid pending config state. Use /config.",
+                    "Invalid pending config state. Use /settings.",
                 )
                 return
 
@@ -209,7 +212,10 @@ class CallbackRouterService:
                     parsed_value = _parse_tag_choices(pending_raw_value)
                 elif pending_key == "daily_brief_time_utc":
                     parsed_value = _parse_daily_brief_time_utc(pending_raw_value)
-                elif pending_key == "prompt_for_mood_if_missing":
+                elif pending_key in {
+                    "prompt_for_mood_if_missing",
+                    "bot_menu_enabled",
+                }:
                     parsed_value = bool(pending_raw_value)
 
                 confirmation = self._apply_runtime_config(
@@ -219,7 +225,7 @@ class CallbackRouterService:
                 )
             except ValueError:
                 await query.edit_message_text(
-                    "Validation failed. Please restart with /config.",
+                    "Validation failed. Please restart with /settings.",
                 )
                 return
             except OSError:

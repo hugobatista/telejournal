@@ -75,6 +75,7 @@ def test_load_settings_builds_defaults(
     monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "09:30")
     monkeypatch.setenv("TAG_CHOICES", "family,focus")
     monkeypatch.setenv("PROMPT_FOR_MOOD_IF_MISSING", "false")
+    monkeypatch.setenv("BOT_MENU_ENABLED", "false")
 
     settings = load_settings()
 
@@ -87,6 +88,7 @@ def test_load_settings_builds_defaults(
     assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "09:30:00"
     assert settings.tag_choices == ("family", "focus")
     assert settings.prompt_for_mood_if_missing is False
+    assert settings.bot_menu_enabled is False
 
 
 def test_load_settings_defaults_window_seconds(
@@ -113,6 +115,7 @@ def test_load_settings_defaults_tag_choices_and_mood_prompt(
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
     monkeypatch.delenv("TAG_CHOICES", raising=False)
     monkeypatch.delenv("PROMPT_FOR_MOOD_IF_MISSING", raising=False)
+    monkeypatch.delenv("BOT_MENU_ENABLED", raising=False)
 
     settings = load_settings()
 
@@ -126,6 +129,7 @@ def test_load_settings_defaults_tag_choices_and_mood_prompt(
         "social",
     )
     assert settings.prompt_for_mood_if_missing is True
+    assert settings.bot_menu_enabled is True
 
 
 def test_load_settings_daily_brief_defaults_to_morning_utc(
@@ -245,6 +249,7 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
                 "  - family",
                 "  - focus",
                 "prompt_for_mood_if_missing: false",
+                "bot_menu_enabled: false",
             ]
         ),
         encoding="utf-8",
@@ -261,6 +266,7 @@ def test_load_settings_yaml_values(tmp_path: Path) -> None:
     assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "07:45:00"
     assert settings.tag_choices == ("family", "focus")
     assert settings.prompt_for_mood_if_missing is False
+    assert settings.bot_menu_enabled is False
 
 
 def test_load_settings_priority_cli_over_yaml_over_env(
@@ -276,6 +282,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "08:00")
     monkeypatch.setenv("TAG_CHOICES", "envtag")
     monkeypatch.setenv("PROMPT_FOR_MOOD_IF_MISSING", "false")
+    monkeypatch.setenv("BOT_MENU_ENABLED", "false")
 
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(
@@ -289,6 +296,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
                 "daily_brief_time_utc: '10:15'",
                 "tag_choices: [yaml, tags]",
                 "prompt_for_mood_if_missing: true",
+                "bot_menu_enabled: true",
             ]
         ),
         encoding="utf-8",
@@ -303,6 +311,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
             "daily_brief_time_utc": "13:45",
             "tag_choices": ["cli", "tags"],
             "prompt_for_mood_if_missing": False,
+            "bot_menu_enabled": False,
         },
     )
 
@@ -315,6 +324,7 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "13:45:00"
     assert settings.tag_choices == ("cli", "tags")
     assert settings.prompt_for_mood_if_missing is False
+    assert settings.bot_menu_enabled is False
 
 
 def test_load_settings_cli_env_expansion(

@@ -38,6 +38,10 @@ from telejournal.logic import (
     should_prompt_for_mood,
 )
 from telejournal.bot_media import MediaEntryService
+from telejournal.bot_setdate import (
+    SETDATE_CALLBACK_PREFIX,
+    SetDateFlowService,
+)
 from telejournal.runtime_config import (
     apply_runtime_setting,
     format_runtime_config_summary,
@@ -119,7 +123,9 @@ class JournalBot:
             ),
             config_summary=lambda: self._config_summary(),
             config_keyboard=lambda: self._config_keyboard(),
-            config_prompt_bool_keyboard=lambda: self._config_prompt_bool_keyboard(),
+            config_prompt_bool_keyboard=lambda key: self._config_prompt_bool_keyboard(
+                key
+            ),
             config_confirm_keyboard=lambda: self._config_confirm_keyboard(),
             chat_id_resolver=lambda update: self._chat_id(update),
             send_note_text_only=lambda *args: self._send_note_text_only(*args),
@@ -153,6 +159,17 @@ class JournalBot:
             override_date_key=OVERRIDE_DATE_KEY,
             logger=LOGGER,
         )
+        self._setdate_flow = SetDateFlowService(
+            is_private_and_authorized=lambda update: self._is_private_and_authorized(
+                update
+            ),
+            chat_data_resolver=lambda context: self._chat_data(context),
+            setdate_with_args=lambda update, context: self._commands.setdate_command(
+                update,
+                context,
+            ),
+            override_date_key=OVERRIDE_DATE_KEY,
+        )
 
     @staticmethod
     def _message_marker(chat_id: int, message_id: int) -> str:
@@ -180,11 +197,11 @@ class JournalBot:
         )
 
     def _config_summary(self) -> str:
-        """Render current runtime-configurable values for /config."""
+        """Render current runtime-configurable values for /settings."""
         return format_runtime_config_summary(self._settings)
 
     def _config_keyboard(self) -> InlineKeyboardMarkup:
-        """Build keyboard for interactive /config setting selection."""
+        """Build keyboard for interactive /settings setting selection."""
         return InlineKeyboardMarkup(
             [
                 [
@@ -210,6 +227,14 @@ class JournalBot:
                         ),
                     )
                 ],
+                [
+                    InlineKeyboardButton(
+                        "bot_menu_enabled",
+                        callback_data=(
+                            f"{CONFIG_CALLBACK_PREFIX}edit:bot_menu_enabled"
+                        ),
+                    )
+                ],
             ]
         )
 
@@ -232,18 +257,18 @@ class JournalBot:
         )
 
     @staticmethod
-    def _config_prompt_bool_keyboard() -> InlineKeyboardMarkup:
-        """Build keyboard for boolean prompt configuration."""
+    def _config_prompt_bool_keyboard(key: str) -> InlineKeyboardMarkup:
+        """Build keyboard for boolean runtime configuration values."""
         return InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
                         "true",
-                        callback_data=(f"{CONFIG_CALLBACK_PREFIX}set_prompt:true"),
+                        callback_data=(f"{CONFIG_CALLBACK_PREFIX}set_bool:{key}:true"),
                     ),
                     InlineKeyboardButton(
                         "false",
-                        callback_data=(f"{CONFIG_CALLBACK_PREFIX}set_prompt:false"),
+                        callback_data=(f"{CONFIG_CALLBACK_PREFIX}set_bool:{key}:false"),
                     ),
                 ],
                 [
@@ -401,7 +426,7 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
         message: Any,
     ) -> bool:
-        """Handle guided /config text input; returns True when consumed."""
+        """Handle guided /settings text input; returns True when consumed."""
         chat_data = self._chat_data(context)
         flow_state = chat_data.get(CONFIG_FLOW_KEY)
         if not isinstance(flow_state, dict):
@@ -467,7 +492,7 @@ class JournalBot:
             )
             return True
 
-        await message.reply_text("This setting expects button input. Use /config.")
+        await message.reply_text("This setting expects button input. Use /settings.")
         return True
 
     async def _safe_user_error(
@@ -599,8 +624,24 @@ class JournalBot:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Set in-memory date override for subsequent entries."""
-        await self._commands.setdate_command(update, context)
+        """Set date override directly or start the guided /setdate flow."""
+        await self._setdate_flow.start(update, context)
+
+    async def setdate_calendar_callback(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> int:
+        """Handle setdate calendar callbacks for month navigation and date pick."""
+        return await self._setdate_flow.handle_calendar_callback(update, context)
+
+    async def setdate_conversation_input(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> int:
+        """Handle guided /setdate date input from chat text."""
+        return await self._setdate_flow.handle_text_input(update, context)
 
     async def resetdate_command(
         self,
@@ -642,13 +683,13 @@ class JournalBot:
         """Display tags keyboard or add tags directly from command args."""
         await self._commands.tags_command(update, context)
 
-    async def config_command(
+    async def settings_command(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Start guided runtime configuration for supported settings."""
-        await self._commands.config_command(update, context)
+        await self._commands.settings_command(update, context)
 
     async def _record_entry(
         self,
@@ -1073,6 +1114,10 @@ class JournalBot:
         if not query or not query.data:
             return
 
+        if query.data.startswith(SETDATE_CALLBACK_PREFIX):
+            await self.setdate_calendar_callback(update, context)
+            return
+
         await query.answer()
 
         chat_data = self._chat_data(context)
@@ -1219,6 +1264,8 @@ class JournalBot:
             & filters.ChatType.PRIVATE
         )
 
+        application.add_handler(CommandHandler("setdate", self.setdate_command))
+
         application.add_handler(MessageHandler(text_filter, self.handle_journal_entry))
         application.add_handler(MessageHandler(photo_filter, self.handle_journal_entry))
         application.add_handler(MessageHandler(voice_filter, self.handle_journal_entry))
@@ -1233,13 +1280,12 @@ class JournalBot:
             MessageHandler(edited_text_filter, self.handle_journal_entry)
         )
 
-        application.add_handler(CommandHandler("setdate", self.setdate_command))
         application.add_handler(CommandHandler("resetdate", self.resetdate_command))
         application.add_handler(CommandHandler("tags", self.tags_command))
         application.add_handler(CommandHandler("mood", self.mood_command))
         application.add_handler(CommandHandler("delete", self.delete_command))
         application.add_handler(CommandHandler("show", self.show_command))
-        application.add_handler(CommandHandler("config", self.config_command))
+        application.add_handler(CommandHandler("settings", self.settings_command))
         application.add_handler(
             CommandHandler("todayinhistory", self.todayinhistory_command)
         )

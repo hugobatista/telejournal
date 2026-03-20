@@ -1,4 +1,4 @@
-"""Runtime configuration utilities for /config updates and persistence."""
+"""Runtime configuration utilities for /settings updates and persistence."""
 
 from __future__ import annotations
 
@@ -23,11 +23,13 @@ def format_runtime_config_summary(settings: Settings) -> str:
 
     tags = ", ".join(settings.tag_choices)
     mood_flag = "true" if settings.prompt_for_mood_if_missing else "false"
+    bot_menu_flag = "true" if settings.bot_menu_enabled else "false"
     return (
         "Current runtime config:\n"
         f"- tag_choices: {tags}\n"
         f"- daily_brief_time_utc: {daily_brief}\n"
-        f"- prompt_for_mood_if_missing: {mood_flag}"
+        f"- prompt_for_mood_if_missing: {mood_flag}\n"
+        f"- bot_menu_enabled: {bot_menu_flag}"
     )
 
 
@@ -58,6 +60,14 @@ def apply_runtime_setting(
             f"Updated prompt_for_mood_if_missing: {'true' if enabled else 'false'}",
         )
 
+    if key == "bot_menu_enabled":
+        enabled = bool(value)
+        updated = replace(settings, bot_menu_enabled=enabled)
+        return (
+            updated,
+            f"Updated bot_menu_enabled: {'true' if enabled else 'false'}",
+        )
+
     raise ValueError(f"Unsupported config key: {key}")
 
 
@@ -77,6 +87,7 @@ def _serialize_settings_for_yaml(settings: Settings) -> dict[str, Any]:
         "daily_brief_time_utc": daily_brief_raw,
         "tag_choices": list(settings.tag_choices),
         "prompt_for_mood_if_missing": settings.prompt_for_mood_if_missing,
+        "bot_menu_enabled": settings.bot_menu_enabled,
     }
 
 

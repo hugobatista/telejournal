@@ -12,8 +12,8 @@ from typing import Any
 import typer
 
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application
+from telegram import BotCommand, Update
+from telegram.ext import Application, CommandHandler, ConversationHandler
 
 from telejournal import __version__
 from telejournal.bot import JournalBot
@@ -22,6 +22,8 @@ from telejournal.logger import setup_default_logging, setup_logging
 from telejournal.output_handler import OutputHandler
 
 __all__ = ["app", "main", "run"]
+
+SETTINGS_BOT_DATA_KEY = "settings"
 
 app = typer.Typer(help="Telegram bot that journals private messages into your vault.")
 
@@ -58,9 +60,86 @@ def _build_cli_overrides(
     }
 
 
+def _fallback_command_description(command: str) -> str:
+    """Build a readable menu description from a command token."""
+    normalized = command.replace("_", " ").replace("-", " ").strip()
+    if not normalized:
+        return "Use this command"
+    return f"{normalized.capitalize()} the bot"
+
+
+def _command_description_from_handler(
+    handler: CommandHandler,  # type: ignore[type-arg]
+    command: str,
+) -> str:
+    """Resolve command description from callback docstring or fallback text."""
+    callback = getattr(handler, "callback", None)
+    if callable(callback):
+        doc = inspect.getdoc(callback)
+        if doc:
+            first_sentence = doc.strip().split("\n", maxsplit=1)[0].strip()
+            if first_sentence:
+                return first_sentence.rstrip(".")
+    return _fallback_command_description(command)
+
+
+def _build_bot_commands(
+    application: Application,  # type: ignore[type-arg]
+) -> list[BotCommand]:
+    """Build unique command menu items from registered command handlers."""
+    commands: list[BotCommand] = []
+    seen_commands: set[str] = set()
+
+    def _append_from_handler(handler: object) -> None:
+        if isinstance(handler, CommandHandler):
+            for command in handler.commands:
+                if command in seen_commands:
+                    continue
+                seen_commands.add(command)
+                commands.append(
+                    BotCommand(
+                        command=command,
+                        description=_command_description_from_handler(
+                            handler,
+                            command,
+                        ),
+                    )
+                )
+            return
+
+        if isinstance(handler, ConversationHandler):
+            for entry in handler.entry_points:
+                _append_from_handler(entry)
+            for fallbacks in handler.fallbacks:
+                _append_from_handler(fallbacks)
+            for state_handlers in handler.states.values():
+                for state_handler in state_handlers:
+                    _append_from_handler(state_handler)
+
+    for handlers in application.handlers.values():
+        for handler in handlers:
+            _append_from_handler(handler)
+
+    return commands
+
+
+async def post_init(application: Application) -> None:  # type: ignore[type-arg]
+    """Register command menu items after all handlers are attached."""
+    settings = application.bot_data.get(SETTINGS_BOT_DATA_KEY)
+    if isinstance(settings, Settings) and not settings.bot_menu_enabled:
+        await application.bot.delete_my_commands()
+        return
+
+    commands = _build_bot_commands(application)
+    await application.bot.set_my_commands(commands)
+
+
 def _start_bot(telegram_token: str, settings: Settings) -> None:
     """Create and run the Telegram polling application."""
-    app_instance = Application.builder().token(telegram_token).build()
+    app_instance = (
+        Application.builder().token(telegram_token).post_init(post_init).build()
+    )
+    app_instance.bot_data[SETTINGS_BOT_DATA_KEY] = settings
 
     journal_bot = JournalBot(settings)
     journal_bot.register_handlers(app_instance)

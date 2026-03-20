@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from telegram.constants import ChatType
+from telegram.ext import ConversationHandler
 
 from telejournal.bot import (
     ACTIVE_CHATS_KEY,
@@ -25,6 +26,7 @@ from telejournal.bot import (
     MAX_TRACKED_REPLY_SOURCES,
     MOOD_CALLBACK_PREFIX,
     NO_MEMORIES_MESSAGE,
+    OVERRIDE_DATE_KEY,
     STARTUP_JOB_NAME,
     STARTUP_MESSAGE,
     TAG_CALLBACK_PREFIX,
@@ -880,14 +882,14 @@ async def test_prompt_for_mood_respects_settings_flag(
 
 
 @pytest.mark.asyncio
-async def test_config_command_and_prompt_toggle_flow(
+async def test_settings_command_and_prompt_toggle_flow(
     journal_bot: JournalBot,
 ) -> None:
-    """Config command should guide and apply prompt toggle updates safely."""
+    """Settings command should guide and apply prompt toggle updates safely."""
     context = _context()
     update = _private_update()
 
-    await journal_bot.config_command(update, context)
+    await journal_bot.settings_command(update, context)
     first_reply = update.effective_message.reply_text.await_args
     assert "Current runtime config" in first_reply.args[0]
     assert first_reply.kwargs["reply_markup"]
@@ -899,7 +901,9 @@ async def test_config_command_and_prompt_toggle_flow(
     assert choose_prompt.callback_query.edit_message_text.await_count == 1
 
     set_false = _private_update(
-        callback_data=f"{CONFIG_CALLBACK_PREFIX}set_prompt:false"
+        callback_data=(
+            f"{CONFIG_CALLBACK_PREFIX}set_bool:prompt_for_mood_if_missing:false"
+        )
     )
     await journal_bot.callback_router(set_false, context)
 
@@ -907,6 +911,31 @@ async def test_config_command_and_prompt_toggle_flow(
     await journal_bot.callback_router(confirm, context)
 
     assert journal_bot._settings.prompt_for_mood_if_missing is False
+
+
+@pytest.mark.asyncio
+async def test_settings_command_bot_menu_toggle_flow(
+    journal_bot: JournalBot,
+) -> None:
+    """Settings command should support toggling bot_menu_enabled."""
+    context = _context()
+    update = _private_update()
+
+    await journal_bot.settings_command(update, context)
+    choose_menu = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}edit:bot_menu_enabled"
+    )
+    await journal_bot.callback_router(choose_menu, context)
+
+    set_false = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}set_bool:bot_menu_enabled:false"
+    )
+    await journal_bot.callback_router(set_false, context)
+
+    confirm = _private_update(callback_data=f"{CONFIG_CALLBACK_PREFIX}confirm")
+    await journal_bot.callback_router(confirm, context)
+
+    assert journal_bot._settings.bot_menu_enabled is False
 
 
 def test_runtime_config_helpers_cover_key_branches(journal_bot: JournalBot) -> None:
@@ -956,6 +985,9 @@ async def test_apply_runtime_config_and_reschedule_branches(
         context,
     )
     assert "true" in msg
+
+    msg = journal_bot._apply_runtime_config("bot_menu_enabled", False, context)
+    assert "false" in msg
 
     with pytest.raises(ValueError, match="Unsupported config key"):
         journal_bot._apply_runtime_config("unknown", "x", context)
@@ -1041,7 +1073,9 @@ async def test_config_callback_router_defensive_and_cancel_back_paths(
     assert context.chat_data[CONFIG_FLOW_KEY]["field"] == "daily_brief_time_utc"
 
     invalid_set_prompt = _private_update(
-        callback_data=f"{CONFIG_CALLBACK_PREFIX}set_prompt:maybe"
+        callback_data=(
+            f"{CONFIG_CALLBACK_PREFIX}set_bool:prompt_for_mood_if_missing:maybe"
+        )
     )
     await journal_bot.callback_router(invalid_set_prompt, context)
 
@@ -1121,15 +1155,136 @@ def test_extract_reply_quote_without_source_tracking_returns_quote(
 
 
 @pytest.mark.asyncio
-async def test_config_command_early_return_paths(journal_bot: JournalBot) -> None:
-    """Config command should return for unauthorized users or missing message."""
+async def test_settings_command_early_return_paths(journal_bot: JournalBot) -> None:
+    """Settings command should return for unauthorized users or missing message."""
     unauthorized = _private_update(user_id=99)
-    await journal_bot.config_command(unauthorized, _context())
+    await journal_bot.settings_command(unauthorized, _context())
     assert unauthorized.effective_message.reply_text.await_count == 0
 
     missing_message = _private_update()
     missing_message.effective_message = None
-    await journal_bot.config_command(missing_message, _context())
+    await journal_bot.settings_command(missing_message, _context())
+
+
+@pytest.mark.asyncio
+async def test_setdate_guided_conversation_flow(journal_bot: JournalBot) -> None:
+    """Setdate without args should start guided mode and accept date input."""
+    context = _context(args=[])
+    start_update = _private_update(text="/setdate")
+
+    state = await journal_bot.setdate_command(start_update, context)
+    assert state is None
+    assert start_update.effective_message.reply_text.await_args.kwargs["reply_markup"]
+
+    invalid_date_update = _private_update(text="20-03-2026")
+    state = await journal_bot.setdate_conversation_input(invalid_date_update, context)
+    assert state == 1
+
+    valid_date_update = _private_update(text="2026-03-20")
+    state = await journal_bot.setdate_conversation_input(valid_date_update, context)
+    assert state == ConversationHandler.END
+    assert OVERRIDE_DATE_KEY in context.chat_data
+
+
+@pytest.mark.asyncio
+async def test_setdate_calendar_callback_flow(journal_bot: JournalBot) -> None:
+    """Setdate calendar callbacks should support navigation, pick, and cancel."""
+    context = _context(args=[])
+
+    nav_update = _private_update(callback_data="setdatecal:nav:2026-04")
+    state = await journal_bot.setdate_calendar_callback(nav_update, context)
+    assert state == 1
+    assert nav_update.callback_query.edit_message_text.await_count == 1
+
+    pick_update = _private_update(callback_data="setdatecal:pick:2026-04-17")
+    state = await journal_bot.setdate_calendar_callback(pick_update, context)
+    assert state == ConversationHandler.END
+    assert OVERRIDE_DATE_KEY in context.chat_data
+
+    cancel_update = _private_update(callback_data="setdatecal:cancel")
+    state = await journal_bot.setdate_calendar_callback(cancel_update, context)
+    assert state == ConversationHandler.END
+
+
+@pytest.mark.asyncio
+async def test_setdate_calendar_callback_defensive_paths(
+    journal_bot: JournalBot,
+) -> None:
+    """Calendar callback handler should gracefully handle invalid payloads."""
+    context = _context(args=[])
+
+    unauthorized = _private_update(user_id=99, callback_data="setdatecal:noop")
+    state = await journal_bot.setdate_calendar_callback(unauthorized, context)
+    assert state == ConversationHandler.END
+
+    no_query = _private_update()
+    state = await journal_bot.setdate_calendar_callback(no_query, context)
+    assert state == 1
+
+    non_string_data = _private_update(callback_data="setdatecal:noop")
+    non_string_data.callback_query.data = 123
+    state = await journal_bot.setdate_calendar_callback(non_string_data, context)
+    assert state == 1
+
+    wrong_prefix = _private_update(callback_data="other:noop")
+    state = await journal_bot.setdate_calendar_callback(wrong_prefix, context)
+    assert state == 1
+
+    noop = _private_update(callback_data="setdatecal:noop")
+    state = await journal_bot.setdate_calendar_callback(noop, context)
+    assert state == 1
+
+    nav_invalid = _private_update(callback_data="setdatecal:nav:2026-13")
+    state = await journal_bot.setdate_calendar_callback(nav_invalid, context)
+    assert state == 1
+
+    pick_invalid = _private_update(callback_data="setdatecal:pick:bad-date")
+    state = await journal_bot.setdate_calendar_callback(pick_invalid, context)
+    assert state == 1
+
+    unknown = _private_update(callback_data="setdatecal:unknown")
+    state = await journal_bot.setdate_calendar_callback(unknown, context)
+    assert state == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_router_delegates_setdate_calendar(
+    journal_bot: JournalBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Callback router should delegate setdate calendar payloads early."""
+    context = _context()
+    update = _private_update(callback_data="setdatecal:noop")
+    called = {"value": False}
+
+    async def _fake_setdate_callback(*args: object, **kwargs: object) -> int:
+        del args, kwargs
+        called["value"] = True
+        return ConversationHandler.END
+
+    monkeypatch.setattr(
+        journal_bot, "setdate_calendar_callback", _fake_setdate_callback
+    )
+    await journal_bot.callback_router(update, context)
+
+    assert called["value"]
+
+
+@pytest.mark.asyncio
+async def test_setdate_conversation_defensive_paths(journal_bot: JournalBot) -> None:
+    """Guided setdate input should handle unauthorized and non-text updates."""
+    unauthorized = _private_update(user_id=99, text="2026-03-20")
+    unauthorized_context = _context(args=[])
+
+    state = await journal_bot.setdate_conversation_input(
+        unauthorized,
+        unauthorized_context,
+    )
+    assert state == ConversationHandler.END
+
+    no_text_update = _private_update(text=None)
+    state = await journal_bot.setdate_conversation_input(no_text_update, _context())
+    assert state == 1
 
 
 @pytest.mark.asyncio
@@ -1204,6 +1359,11 @@ async def test_config_callback_edit_unknown_and_daily_confirm_branch(
     )
     await journal_bot.callback_router(unknown_edit, context)
 
+    invalid_bool_key = _private_update(
+        callback_data=f"{CONFIG_CALLBACK_PREFIX}set_bool:unknown:true"
+    )
+    await journal_bot.callback_router(invalid_bool_key, context)
+
     context.chat_data[CONFIG_PENDING_KEY] = {
         "key": "daily_brief_time_utc",
         "value": "08:30",
@@ -1237,6 +1397,18 @@ async def test_config_callback_confirm_handles_persist_oserror(
 
     text = update.callback_query.edit_message_text.await_args.args[0]
     assert "Failed to persist config to disk" in text
+
+
+@pytest.mark.asyncio
+async def test_command_service_setdate_unauthorized_returns_early(
+    journal_bot: JournalBot,
+) -> None:
+    """Command service setdate should return without replying when unauthorized."""
+    unauthorized_update = _private_update(user_id=99)
+
+    await journal_bot._commands.setdate_command(unauthorized_update, _context())
+
+    assert unauthorized_update.effective_message.reply_text.await_count == 0
 
 
 @pytest.mark.asyncio

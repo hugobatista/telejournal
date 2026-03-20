@@ -26,12 +26,14 @@ def test_format_runtime_config_summary_with_enabled_brief(tmp_path: Path) -> Non
         daily_brief_time_utc=time(9, 30, tzinfo=UTC),
         tag_choices=("family", "focus"),
         prompt_for_mood_if_missing=False,
+        bot_menu_enabled=False,
     )
 
     summary = format_runtime_config_summary(settings)
     assert "09:30:00" in summary
     assert "family, focus" in summary
     assert "false" in summary
+    assert "bot_menu_enabled" in summary
 
 
 def test_apply_runtime_setting_supported_keys(tmp_path: Path) -> None:
@@ -70,6 +72,14 @@ def test_apply_runtime_setting_supported_keys(tmp_path: Path) -> None:
     assert updated_prompt.prompt_for_mood_if_missing is False
     assert "false" in msg_prompt
 
+    updated_menu, msg_menu = apply_runtime_setting(
+        settings,
+        "bot_menu_enabled",
+        False,
+    )
+    assert updated_menu.bot_menu_enabled is False
+    assert "false" in msg_menu
+
 
 def test_apply_runtime_setting_rejects_unknown_key(tmp_path: Path) -> None:
     """Unsupported runtime keys should raise a clear ValueError."""
@@ -90,6 +100,7 @@ def test_persist_runtime_settings_creates_default_config_when_missing(
         allowed_user_ids={3, 1},
         tag_choices=("family", "focus"),
         prompt_for_mood_if_missing=True,
+        bot_menu_enabled=False,
         config_path=None,
     )
 
@@ -105,6 +116,7 @@ def test_persist_runtime_settings_creates_default_config_when_missing(
     assert payload["allowed_user_ids"] == [1, 3]
     assert payload["tag_choices"] == ["family", "focus"]
     assert payload["prompt_for_mood_if_missing"] is True
+    assert payload["bot_menu_enabled"] is False
 
 
 def test_persist_runtime_settings_backs_up_existing_yaml(tmp_path: Path) -> None:
