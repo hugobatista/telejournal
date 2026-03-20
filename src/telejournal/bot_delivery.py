@@ -15,6 +15,7 @@ from telejournal.formatting import (
     NoteRenderPayload,
     TextChunk,
     parse_note_render_payload,
+    strip_internal_tracking_markers,
 )
 
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -154,10 +155,11 @@ class NoteDeliveryService:
         source_note_dt: datetime | None = None,
     ) -> None:
         """Send note content exactly as text, preserving embed links."""
+        sanitized_content = strip_internal_tracking_markers(note_content)
         await self.send_chunked_text(
             chat_id,
             bot,
-            note_content,
+            sanitized_content,
             source_note_dt=source_note_dt,
         )
 

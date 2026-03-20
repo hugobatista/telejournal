@@ -9,7 +9,11 @@ from telejournal.formatting import (
     AttachmentChunk,
     MOOD_LABELS,
     NoteRenderPayload,
+    TG_ENTRY_END_TOKEN,
+    TG_ENTRY_START_TOKEN,
     TextChunk,
+    marker_end_comment,
+    marker_start_comment,
     extract_reply_quote,
     format_mood_change_text,
     format_mood_saved_text,
@@ -22,6 +26,7 @@ from telejournal.formatting import (
     format_text_entry,
     render_message_markdown,
     parse_note_render_payload,
+    strip_internal_tracking_markers,
 )
 
 
@@ -255,6 +260,44 @@ def test_parse_note_render_payload_strips_alias_and_heading() -> None:
             AttachmentChunk(attachment_rel="2026/attachments/b.mp4"),
         ]
     )
+
+
+def test_strip_internal_tracking_markers() -> None:
+    """Internal Telegram marker comments should be removed from note text."""
+    marker = "6733378829:969"
+    content = (
+        "header\n"
+        f"{marker_start_comment(marker)}\n"
+        "body\n"
+        f"{marker_end_comment(marker)}\n"
+        "tail"
+    )
+    assert strip_internal_tracking_markers(content) == "header\nbody\ntail"
+
+
+def test_parse_note_render_payload_ignores_internal_tracking_markers() -> None:
+    """Render payload parser should not surface internal marker comments."""
+    marker = "6733378829:969"
+    content = (
+        f"{marker_start_comment(marker)}\n"
+        "hello\n"
+        "![[2026/attachments/a.jpg]]\n"
+        f"{marker_end_comment(marker)}"
+    )
+    payload = parse_note_render_payload(content)
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="hello\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/a.jpg"),
+            TextChunk(text="\n"),
+        ]
+    )
+
+
+def test_marker_tokens_are_stable() -> None:
+    """Marker tokens should remain explicit and stable for compatibility."""
+    assert TG_ENTRY_START_TOKEN == "tg-entry-start"
+    assert TG_ENTRY_END_TOKEN == "tg-entry-end"
 
 
 def test_format_with_quote_empty_lines() -> None:

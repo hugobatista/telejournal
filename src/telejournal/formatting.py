@@ -17,7 +17,13 @@ MOOD_LABELS = {
     5: "😊",
 }
 
+TG_ENTRY_START_TOKEN = "tg-entry-start"
+TG_ENTRY_END_TOKEN = "tg-entry-end"
+
 _EMBED_RE = re.compile(r"!\[\[(?P<target>[^\]]+)\]\]")
+_INTERNAL_TG_ENTRY_MARKER_RE = re.compile(
+    rf"(?m)^<!-- (?:{TG_ENTRY_START_TOKEN}|{TG_ENTRY_END_TOKEN}):[^>]+ -->\n?"
+)
 
 
 @dataclass(frozen=True)
@@ -47,11 +53,12 @@ def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
     Obsidian-style embeds like ``![[2026/attachments/file.jpg]]`` are extracted as
     attachment chunks while preserving surrounding text in separate chunks.
     """
+    sanitized_content = strip_internal_tracking_markers(note_content)
     chunks: list[TextChunk | AttachmentChunk] = []
     cursor = 0
 
-    for match in _EMBED_RE.finditer(note_content):
-        before = note_content[cursor : match.start()]
+    for match in _EMBED_RE.finditer(sanitized_content):
+        before = sanitized_content[cursor : match.start()]
         if before:
             chunks.append(TextChunk(text=before))
 
@@ -64,11 +71,41 @@ def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
 
         cursor = match.end()
 
-    tail = note_content[cursor:]
+    tail = sanitized_content[cursor:]
     if tail:
         chunks.append(TextChunk(text=tail))
 
     return NoteRenderPayload(chunks=chunks)
+
+
+def strip_internal_tracking_markers(note_content: str) -> str:
+    """Remove internal Telegram entry-tracking markers from note text."""
+    return _INTERNAL_TG_ENTRY_MARKER_RE.sub("", note_content)
+
+
+def build_message_marker(chat_id: int, message_id: int) -> str:
+    """Build stable marker key for an entry generated from one message."""
+    return f"{chat_id}:{message_id}"
+
+
+def marker_start_comment(marker: str) -> str:
+    """Return marker start line for persisted entry bodies."""
+    return f"<!-- {TG_ENTRY_START_TOKEN}:{marker} -->"
+
+
+def marker_end_comment(marker: str) -> str:
+    """Return marker end line for persisted entry bodies."""
+    return f"<!-- {TG_ENTRY_END_TOKEN}:{marker} -->"
+
+
+def wrap_body_with_marker(body: str, marker: str) -> str:
+    """Wrap body payload with marker comments for future in-place updates."""
+    clean_body = body.strip()
+    return (
+        f"{marker_start_comment(marker)}\n"
+        f"{clean_body}\n"
+        f"{marker_end_comment(marker)}"
+    )
 
 
 def extract_mood_value(raw_mood: Any) -> int | None:

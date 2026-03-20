@@ -16,6 +16,8 @@ import aiofiles
 import yaml
 from telegram import PhotoSize, Video, VideoNote, Voice
 
+from telejournal.formatting import marker_end_comment, marker_start_comment
+
 LOGGER = logging.getLogger(__name__)
 _TIMESTAMP_RE = re.compile(
     r"^\s*(?:%%\s*)?(?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?(?:\s*%%)?"
@@ -219,8 +221,8 @@ class VaultRepository:
             if frontmatter_updates:
                 frontmatter.update(frontmatter_updates)
 
-            start_marker = f"<!-- tg-entry-start:{marker} -->"
-            end_marker = f"<!-- tg-entry-end:{marker} -->"
+            start_marker = marker_start_comment(marker)
+            end_marker = marker_end_comment(marker)
             escaped_start = re.escape(start_marker)
             escaped_end = re.escape(end_marker)
             pattern = re.compile(

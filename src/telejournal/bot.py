@@ -27,11 +27,13 @@ from telejournal.bot_delivery import NoteDeliveryService
 from telejournal import bot_helpers as _bot_helpers
 from telejournal.config import Settings
 from telejournal.formatting import (
+    build_message_marker,
     extract_reply_quote,
     format_entry_block,
     format_text_entry,
     format_with_quote,
     render_message_markdown,
+    wrap_body_with_marker,
 )
 from telejournal.logic import (
     effective_note_datetime,
@@ -169,31 +171,6 @@ class JournalBot:
                 context,
             ),
             override_date_key=OVERRIDE_DATE_KEY,
-        )
-
-    @staticmethod
-    def _message_marker(chat_id: int, message_id: int) -> str:
-        """Build stable marker key for an entry generated from one message."""
-        return f"{chat_id}:{message_id}"
-
-    @staticmethod
-    def _marker_start(marker: str) -> str:
-        """Return marker start line for persisted entry bodies."""
-        return f"<!-- tg-entry-start:{marker} -->"
-
-    @staticmethod
-    def _marker_end(marker: str) -> str:
-        """Return marker end line for persisted entry bodies."""
-        return f"<!-- tg-entry-end:{marker} -->"
-
-    @classmethod
-    def _wrap_body_with_marker(cls, body: str, marker: str) -> str:
-        """Wrap body payload with marker comments for future in-place updates."""
-        clean_body = body.strip()
-        return (
-            f"{cls._marker_start(marker)}\n"
-            f"{clean_body}\n"
-            f"{cls._marker_end(marker)}"
         )
 
     def _config_summary(self) -> str:
@@ -721,7 +698,7 @@ class JournalBot:
         as_continuation: bool = False,
     ) -> None:
         """Persist one message payload wrapped with a stable message marker."""
-        marked_body = self._wrap_body_with_marker(body, message_marker)
+        marked_body = wrap_body_with_marker(body, message_marker)
         entry = format_entry_block(note_dt, marked_body, include_timestamp)
         await self._record_entry(
             chat_data,
@@ -971,7 +948,7 @@ class JournalBot:
         message_id_raw = getattr(message, "message_id", None)
         if not isinstance(message_id_raw, int):
             return
-        message_marker = self._message_marker(chat_id, message_id_raw)
+        message_marker = build_message_marker(chat_id, message_id_raw)
 
         if is_edited_message:
             if not message.text:

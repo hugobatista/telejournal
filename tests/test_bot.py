@@ -37,7 +37,16 @@ from telejournal.bot import (
     _truncate_message,
 )
 from telejournal.config import Settings
-from telejournal.formatting import extract_mood_value, parse_note_render_payload
+from telejournal.formatting import (
+    TG_ENTRY_END_TOKEN,
+    TG_ENTRY_START_TOKEN,
+    build_message_marker,
+    extract_mood_value,
+    marker_end_comment,
+    marker_start_comment,
+    parse_note_render_payload,
+    wrap_body_with_marker,
+)
 
 
 class _FakeJobQueue:
@@ -303,7 +312,7 @@ async def test_message_timestamp_window(journal_bot: JournalBot) -> None:
     assert entries[0].startswith("%% ")
     assert "\nfirst" in entries[0]
     assert "second" in entries[1]
-    assert "tg-entry-start" in entries[1]
+    assert TG_ENTRY_START_TOKEN in entries[1]
 
 
 @pytest.mark.asyncio
@@ -444,8 +453,13 @@ async def test_show_callback_sends_embedded_attachment(
 @pytest.mark.asyncio
 async def test_show_callback_sends_note_text_only(journal_bot: JournalBot) -> None:
     """Show callback in raw mode should send note text without rendering embeds."""
+    marker = "6733378829:969"
     journal_bot._repository.get_note_content = AsyncMock(  # type: ignore[attr-defined]
-        return_value="A\n![[2026/attachments/pic.jpg]]\nB"
+        return_value=(
+            f"{marker_start_comment(marker)}\n"
+            "A\n![[2026/attachments/pic.jpg]]\nB\n"
+            f"{marker_end_comment(marker)}"
+        )
     )
     context = _context()
     update = _private_update(
@@ -458,6 +472,8 @@ async def test_show_callback_sends_note_text_only(journal_bot: JournalBot) -> No
         call.args[1] for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
     ]
     assert any("![[2026/attachments/pic.jpg]]" in payload for payload in payloads)
+    assert not any(TG_ENTRY_START_TOKEN in payload for payload in payloads)
+    assert not any(TG_ENTRY_END_TOKEN in payload for payload in payloads)
     assert context.bot.send_photo.await_count == 0  # type: ignore[attr-defined]
 
 
@@ -940,9 +956,9 @@ async def test_settings_command_bot_menu_toggle_flow(
 
 def test_runtime_config_helpers_cover_key_branches(journal_bot: JournalBot) -> None:
     """Runtime config helper methods should return stable marker and summaries."""
-    marker = journal_bot._message_marker(1, 42)
+    marker = build_message_marker(1, 42)
     assert marker == "1:42"
-    assert "tg-entry-start" in journal_bot._wrap_body_with_marker("hello", marker)
+    assert TG_ENTRY_START_TOKEN in wrap_body_with_marker("hello", marker)
     assert "Current runtime config" in journal_bot._config_summary()
 
 
@@ -1610,7 +1626,11 @@ async def test_history_callback_raw_and_rendered_modes(
         return_value=[
             (
                 datetime(2024, 3, 16, tzinfo=UTC),
-                "hello\n![[2024/attachments/mem.jpg]]",
+                (
+                    f"{marker_start_comment('6733378829:969')}\n"
+                    "hello\n![[2024/attachments/mem.jpg]]\n"
+                    f"{marker_end_comment('6733378829:969')}"
+                ),
             )
         ]
     )
@@ -1624,6 +1644,8 @@ async def test_history_callback_raw_and_rendered_modes(
         call.args[1] for call in raw_context.bot.send_message.await_args_list  # type: ignore[attr-defined]
     ]
     assert any("![[2024/attachments/mem.jpg]]" in payload for payload in raw_payloads)
+    assert not any(TG_ENTRY_START_TOKEN in payload for payload in raw_payloads)
+    assert not any(TG_ENTRY_END_TOKEN in payload for payload in raw_payloads)
     assert raw_context.bot.send_photo.await_count == 0  # type: ignore[attr-defined]
 
     rendered_context = _context()
@@ -1631,6 +1653,13 @@ async def test_history_callback_raw_and_rendered_modes(
         callback_data=f"{HISTORY_CALLBACK_PREFIX}history:rendered:2026-03-16"
     )
     await journal_bot.callback_router(rendered_update, rendered_context)
+
+    rendered_payloads = [
+        call.args[1]
+        for call in rendered_context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+    ]
+    assert not any(TG_ENTRY_START_TOKEN in payload for payload in rendered_payloads)
+    assert not any(TG_ENTRY_END_TOKEN in payload for payload in rendered_payloads)
     assert rendered_context.bot.send_photo.await_count == 1  # type: ignore[attr-defined]
 
 

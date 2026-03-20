@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import yaml
 
+from telejournal.formatting import marker_end_comment, marker_start_comment
 from telejournal.storage import VaultRepository
 
 
@@ -392,9 +393,9 @@ async def test_update_marked_entry_replaces_existing_payload(tmp_path: Path) -> 
         "\n".join(
             [
                 "%% 18:34:42 %%",
-                f"<!-- tg-entry-start:{marker} -->",
+                marker_start_comment(marker),
                 "old text",
-                f"<!-- tg-entry-end:{marker} -->",
+                marker_end_comment(marker),
             ]
         ),
     )
