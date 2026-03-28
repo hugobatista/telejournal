@@ -5,9 +5,9 @@
 [![Lint](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml/badge.svg)](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml)
 # Telegram Journal Bot
 
-**Capture thoughts on Telegram, persist them in Obsidian or GitHub, and never lose a moment again.**
+**Capture thoughts on Telegram, persist them in Obsidian, GitHub, OneDrive, or Google Drive, and never lose a moment again.**
 
-Telejournal is a bot that journals every private message into daily markdown notes, persisting to either a local Obsidian vault or a GitHub repository. Designed for personal journaling and private note-taking with rich media support.
+Telejournal is a bot that journals every private message into daily markdown notes, persisting to a local Obsidian vault, a GitHub repository, OneDrive, or Google Drive. Designed for personal journaling and private note-taking with rich media support.
 
 ## Demo
 User messages sent in a private chat are captured by the bot, including text and media.
@@ -357,7 +357,7 @@ bot_menu_enabled: true
 - `telegram_token` (required) - Your Telegram bot token
 - `allowed_user_ids` (required) - List of Telegram user IDs that can use the bot
 - `storage` (required) - Hierarchical storage provider configuration
-  - `storage.provider` - `obsidian_vault`, `github_repo`, or `onedrive`
+  - `storage.provider` - `obsidian_vault`, `github_repo`, `onedrive`, or `google_drive`
   - `storage.obsidian_vault.root` - Filesystem root for vault storage
   - `storage.obsidian_vault.secure_file_permissions` - Restrictive perms toggle for vault storage
   - `storage.github_repo.owner` - GitHub owner/org
@@ -376,6 +376,13 @@ bot_menu_enabled: true
   - `storage.onedrive.access_token` - Cached access token (optional)
   - `storage.onedrive.refresh_token` - Cached refresh token (optional)
   - `storage.onedrive.token_expires_at_utc` - Access token UTC expiry in `YYYY-MM-DDTHH:MM:SSZ` format (optional)
+  - `storage.google_drive.client_id` - Google OAuth client ID
+  - `storage.google_drive.client_secret` - Google OAuth client secret
+  - `storage.google_drive.folder_id` - Drive folder ID target (optional)
+  - `storage.google_drive.batch_window_seconds` - In-memory queue flush window in seconds (default `60`)
+  - `storage.google_drive.access_token` - Cached access token (optional)
+  - `storage.google_drive.refresh_token` - Cached refresh token (optional)
+  - `storage.google_drive.token_expires_at_utc` - Access token UTC expiry in `YYYY-MM-DDTHH:MM:SSZ` format (optional)
 - `log_level` (optional, default: `INFO`) - Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `message_timestamp_window_seconds` (optional, default: `60`) - Messages within this window share the same timestamp
 - `daily_brief_time_utc` (optional, default: `09:00`) - Daily UTC time for the historical same-day brief (`HH:MM` or `HH:MM:SS`), or `0` to disable
