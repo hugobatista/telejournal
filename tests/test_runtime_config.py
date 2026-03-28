@@ -189,3 +189,36 @@ def test_persist_runtime_settings_serializes_github_storage(
     assert payload["storage"]["github_repo"]["repo"] == "journal"
     assert payload["storage"]["github_repo"]["token"] == "token"
     assert payload["storage"]["github_repo"]["batch_window_seconds"] == 180
+
+
+def test_persist_runtime_settings_serializes_onedrive_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persistence should keep onedrive storage configuration hierarchy."""
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(
+        telegram_token="token",
+        vault_root=tmp_path,
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_tenant_id="common",
+        onedrive_client_id="client-id",
+        onedrive_client_secret="client-secret",
+        onedrive_root_path="Apps/telejournal",
+        onedrive_api_base_url="https://graph.microsoft.com/v1.0",
+        onedrive_batch_window_seconds=90,
+        onedrive_access_token="access",
+        onedrive_refresh_token="refresh",
+        onedrive_token_expires_at_utc="2026-03-28T10:00:00Z",
+    )
+
+    _persisted, target_path, _backup_path = persist_runtime_settings(settings)
+    payload = yaml.safe_load(target_path.read_text(encoding="utf-8"))
+
+    assert payload["storage"]["provider"] == "onedrive"
+    assert payload["storage"]["onedrive"]["tenant_id"] == "common"
+    assert payload["storage"]["onedrive"]["client_id"] == "client-id"
+    assert payload["storage"]["onedrive"]["client_secret"] == "client-secret"
+    assert payload["storage"]["onedrive"]["root_path"] == "Apps/telejournal"
+    assert payload["storage"]["onedrive"]["batch_window_seconds"] == 90

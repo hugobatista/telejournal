@@ -1,7 +1,7 @@
 telegram_token: "${TELEGRAM_TOKEN}"
 allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
 storage:
-	provider: obsidian_vault # obsidian_vault or github_repo
+	provider: obsidian_vault # obsidian_vault, github_repo, or onedrive
 	obsidian_vault:
 		root: /data
 		secure_file_permissions: true
@@ -13,6 +13,16 @@ storage:
 		path_prefix: "" # Optional sub-folder inside the repo
 		api_base_url: https://api.github.com
 		batch_window_seconds: 60 # Queue writes in memory and flush in bursts
+	onedrive:
+		tenant_id: common
+		client_id: "${STORAGE_ONEDRIVE_CLIENT_ID}"
+		client_secret: "${STORAGE_ONEDRIVE_CLIENT_SECRET}"
+		root_path: Apps/telejournal
+		api_base_url: https://graph.microsoft.com/v1.0
+		batch_window_seconds: 60
+		access_token: "${STORAGE_ONEDRIVE_ACCESS_TOKEN}" # Optional cached token
+		refresh_token: "${STORAGE_ONEDRIVE_REFRESH_TOKEN}" # Optional cached token
+		token_expires_at_utc: "${STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC}" # Optional
 log_level: INFO
 message_timestamp_window_seconds: 60
 daily_brief_time_utc: "0" # Set to "0" to disable, or specify time in "HH:MM" or "HH:MM:SS" format

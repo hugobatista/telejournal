@@ -37,6 +37,7 @@ from telejournal.bot import (
     _truncate_message,
 )
 from telejournal.config import Settings
+from telejournal.storage import OneDriveAuthorizationRequiredError
 from telejournal.formatting import (
     TG_ENTRY_END_TOKEN,
     TG_ENTRY_START_TOKEN,
@@ -249,8 +250,9 @@ async def test_help_mood_setdate_resetdate_commands(journal_bot: JournalBot) -> 
     await journal_bot.delete_command(update, context)  # type: ignore
     await journal_bot.show_command(update, context)  # type: ignore
     await journal_bot.todayinhistory_command(update, context)  # type: ignore
+    await journal_bot.onedriveauth_command(update, context)  # type: ignore
 
-    assert update.effective_message.reply_text.await_count == 6
+    assert update.effective_message.reply_text.await_count == 7
 
 
 @pytest.mark.asyncio
@@ -856,6 +858,10 @@ async def test_handle_error_and_auth_rejections(journal_bot: JournalBot) -> None
         update_stub = _UpdateStub()
         await journal_bot.handle_error(update_stub, context)
         assert update_stub.effective_message.reply_text.await_count == 1  # type: ignore
+
+        context.error = OneDriveAuthorizationRequiredError("OneDrive auth required")
+        await journal_bot.handle_error(update_stub, context)
+        assert update_stub.effective_message.reply_text.await_count == 2  # type: ignore
     finally:
         bot_module.Update = original_update  # type: ignore
 
@@ -1530,6 +1536,184 @@ async def test_send_startup_message_notifies_all_configured_chats(
     ]
     assert sent_chat_ids == [2, 5, 9]
     assert sent_messages == [STARTUP_MESSAGE, STARTUP_MESSAGE, STARTUP_MESSAGE]
+
+
+@pytest.mark.asyncio
+async def test_send_startup_message_includes_onedrive_auth_instructions(
+    journal_bot: JournalBot,
+) -> None:
+    """Startup greeting should include OneDrive auth guidance when required."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+    )
+    journal_bot._repository.build_authorization_instructions = lambda: "Run /onedriveauth start"  # type: ignore[attr-defined]
+    context = _context()
+
+    await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
+
+    message = context.bot.send_message.await_args.args[1]  # type: ignore[attr-defined]
+    assert "Run /onedriveauth start" in message
+
+
+@pytest.mark.asyncio
+async def test_send_startup_message_handles_auth_instruction_failures(
+    journal_bot: JournalBot,
+) -> None:
+    """Startup greeting should still send when auth instruction building fails."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+    )
+
+    def _raise() -> str:
+        raise RuntimeError("boom")
+
+    journal_bot._repository.build_authorization_instructions = _raise  # type: ignore[attr-defined]
+    context = _context()
+
+    await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
+
+    message = context.bot.send_message.await_args.args[1]  # type: ignore[attr-defined]
+    assert message == STARTUP_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_onedriveauth_command_flows(journal_bot: JournalBot) -> None:
+    """OneDrive auth command should support status, start, complete, and errors."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+    )
+    update = _private_update()
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: "status instructions",
+        start_device_authorization=lambda: "start instructions",
+        complete_device_authorization=lambda: "done",
+        is_authorized=lambda: False,
+    )
+
+    auto_context = _context(args=[])
+    await journal_bot.onedriveauth_command(update, auto_context)
+    assert "done" in update.effective_message.reply_text.await_args.args[0]
+
+    status_context = _context(args=["status"])
+    await journal_bot.onedriveauth_command(update, status_context)
+    assert (
+        "status instructions" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    start_context = _context(args=["start"])
+    await journal_bot.onedriveauth_command(update, start_context)
+    assert (
+        "start instructions" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    complete_context = _context(args=["complete"])
+    await journal_bot.onedriveauth_command(update, complete_context)
+    assert "done" in update.effective_message.reply_text.await_args.args[0]
+
+    invalid_context = _context(args=["invalid"])
+    await journal_bot.onedriveauth_command(update, invalid_context)
+    assert "Use /onedriveauth" in update.effective_message.reply_text.await_args.args[0]
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: None,
+        is_authorized=lambda: True,
+    )
+    auto_authorized_context = _context(args=[])
+    await journal_bot.onedriveauth_command(update, auto_authorized_context)
+    assert (
+        "already authorized" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: None,
+        is_authorized=lambda: True,
+    )
+    authorized_context = _context(args=["status"])
+    await journal_bot.onedriveauth_command(update, authorized_context)
+    assert (
+        "already authorized" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: (_ for _ in ()).throw(
+            RuntimeError("auth failed")
+        ),
+        start_device_authorization=lambda: "ignored",
+        complete_device_authorization=lambda: "ignored",
+        is_authorized=lambda: False,
+    )
+    failing_context = _context(args=["status"])
+    await journal_bot.onedriveauth_command(update, failing_context)
+    assert "auth failed" in update.effective_message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_onedriveauth_command_edge_paths(journal_bot: JournalBot) -> None:
+    """OneDrive auth command should handle authorization and backend edge paths."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={2},
+        storage_provider="onedrive",
+    )
+    unauthorized = _private_update(user_id=1)
+    await journal_bot.onedriveauth_command(unauthorized, _context())
+    assert unauthorized.effective_message.reply_text.await_count == 0
+
+    missing_message = _private_update()
+    missing_message.effective_message = None
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+    )
+    await journal_bot.onedriveauth_command(missing_message, _context())
+
+    update = _private_update()
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        is_authorized=lambda: False,
+    )
+    await journal_bot.onedriveauth_command(update, _context(args=[]))
+    assert (
+        "workflow is unavailable"
+        in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: "status",
+        is_authorized=lambda: False,
+    )
+    await journal_bot.onedriveauth_command(update, _context(args=[]))
+    assert "status" in update.effective_message.reply_text.await_args.args[0]
+
+    await journal_bot.onedriveauth_command(update, _context(args=["start"]))
+    assert (
+        "start is unavailable" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    await journal_bot.onedriveauth_command(update, _context(args=["complete"]))
+    assert (
+        "completion is unavailable"
+        in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: None,
+        is_authorized=lambda: False,
+    )
+    await journal_bot.onedriveauth_command(update, _context(args=[]))
+    assert (
+        "already authorized" in update.effective_message.reply_text.await_args.args[0]
+    )
 
 
 @pytest.mark.asyncio

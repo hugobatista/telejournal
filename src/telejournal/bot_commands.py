@@ -86,6 +86,7 @@ class CommandHandlerService:
             "/delete  Delete last entry and show deleted content\n"
             "/delete day [YYYY-MM-DD]  Delete full day note\n"
             "/settings  Guided runtime configuration\n"
+            "/onedriveauth [start|complete|status]  OneDrive device auth workflow\n"
             "/help"
         )
 
@@ -313,3 +314,90 @@ class CommandHandlerService:
             f"{self._config_summary()}\n\nChoose one setting to update:",
             reply_markup=self._config_keyboard(),
         )
+
+    async def onedriveauth_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Run OneDrive device authorization steps for first-time setup."""
+        if not self._is_private_and_authorized(update):
+            return
+        if not update.effective_message:
+            return
+
+        settings = self._settings()
+        if settings.storage_provider != "onedrive":
+            await update.effective_message.reply_text(
+                "This command is only available when storage.provider is onedrive."
+            )
+            return
+
+        repository = self._repository()
+        start_auth = getattr(repository, "start_device_authorization", None)
+        complete_auth = getattr(repository, "complete_device_authorization", None)
+        show_instructions = getattr(
+            repository, "build_authorization_instructions", None
+        )
+        is_authorized = getattr(repository, "is_authorized", None)
+
+        if not callable(show_instructions):
+            await update.effective_message.reply_text(
+                "OneDrive auth workflow is unavailable for this storage backend."
+            )
+            return
+
+        action = "auto"
+        if context.args:
+            action = context.args[0].strip().lower()
+
+        try:
+            if action in {"start", "restart"}:
+                if not callable(start_auth):
+                    raise RuntimeError("OneDrive auth start is unavailable")
+                result = start_auth()
+                await update.effective_message.reply_text(result)
+                return
+
+            if action in {"complete", "poll"}:
+                if not callable(complete_auth):
+                    raise RuntimeError("OneDrive auth completion is unavailable")
+                result = complete_auth()
+                await update.effective_message.reply_text(result)
+                return
+
+            if action in {"auto", ""}:
+                if callable(is_authorized) and bool(is_authorized()):
+                    await update.effective_message.reply_text(
+                        "OneDrive is already authorized."
+                    )
+                    return
+
+                if callable(complete_auth):
+                    result = complete_auth()
+                    await update.effective_message.reply_text(result)
+                    return
+
+                action = "status"
+
+            if action != "status":
+                await update.effective_message.reply_text(
+                    "Use /onedriveauth [start|complete|status]"
+                )
+                return
+
+            if callable(is_authorized) and bool(is_authorized()):
+                await update.effective_message.reply_text(
+                    "OneDrive is already authorized."
+                )
+                return
+
+            instructions = show_instructions()
+            if instructions is None:
+                await update.effective_message.reply_text(
+                    "OneDrive is already authorized."
+                )
+                return
+            await update.effective_message.reply_text(instructions)
+        except RuntimeError as exc:
+            await update.effective_message.reply_text(str(exc))

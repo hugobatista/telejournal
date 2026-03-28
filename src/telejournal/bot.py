@@ -49,7 +49,7 @@ from telejournal.runtime_config import (
     format_runtime_config_summary,
     persist_runtime_settings,
 )
-from telejournal.storage import build_repository
+from telejournal.storage import OneDriveAuthorizationRequiredError, build_repository
 
 __all__ = ["JournalBot"]
 
@@ -665,6 +665,14 @@ class JournalBot:
         """Start guided runtime configuration for supported settings."""
         await self._commands.settings_command(update, context)
 
+    async def onedriveauth_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Run OneDrive authorization workflow using device-code flow."""
+        await self._commands.onedriveauth_command(update, context)
+
     async def _record_entry(
         self,
         chat_data: dict[str, Any],
@@ -1154,9 +1162,24 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Send a startup greeting to each configured private chat."""
+        startup_message = STARTUP_MESSAGE
+        auth_instructions_builder = getattr(
+            self._repository,
+            "build_authorization_instructions",
+            None,
+        )
+        if callable(auth_instructions_builder):
+            try:
+                instructions = auth_instructions_builder()
+            except RuntimeError:
+                LOGGER.exception("Failed to build OneDrive startup auth instructions")
+            else:
+                if instructions:
+                    startup_message = f"{STARTUP_MESSAGE}\n\n{instructions}"
+
         for chat_id in sorted(self._settings.allowed_user_ids):
             try:
-                await context.bot.send_message(chat_id, STARTUP_MESSAGE)
+                await context.bot.send_message(chat_id, startup_message)
             except (OSError, TelegramError):
                 LOGGER.exception(
                     "Failed to send startup greeting to chat_id=%s",
@@ -1212,6 +1235,11 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Log unexpected handler errors and return a generic user message."""
+        if isinstance(context.error, OneDriveAuthorizationRequiredError):
+            if isinstance(update, Update) and update.effective_message:
+                await update.effective_message.reply_text(str(context.error))
+            return
+
         LOGGER.exception(
             "Unhandled exception while processing update", exc_info=context.error
         )
@@ -1260,6 +1288,9 @@ class JournalBot:
         application.add_handler(CommandHandler("delete", self.delete_command))
         application.add_handler(CommandHandler("show", self.show_command))
         application.add_handler(CommandHandler("settings", self.settings_command))
+        application.add_handler(
+            CommandHandler("onedriveauth", self.onedriveauth_command)
+        )
         application.add_handler(
             CommandHandler("todayinhistory", self.todayinhistory_command)
         )

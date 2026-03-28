@@ -26,6 +26,7 @@ Captured content is appended to your daily note with timestamped entries and str
 - Pluggable storage providers:
   - `obsidian_vault` (filesystem)
   - `github_repo` (GitHub repository via REST API)
+  - `onedrive` (Microsoft OneDrive via Microsoft Graph API)
 - YAML frontmatter management for `mood`, `tags`, and `created`
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
@@ -134,6 +135,34 @@ feedback remains immediate, while GitHub API traffic is reduced.
 During shutdown, telejournal performs a best-effort final flush of queued
 GitHub writes (for example, when receiving SIGTERM in container stop flows).
 
+OneDrive storage provider example:
+
+```bash
+telejournal run \
+  --telegram-token your_token \
+  --storage-provider onedrive \
+  --onedrive-client-id your_app_client_id \
+  --onedrive-client-secret your_app_client_secret \
+  --onedrive-tenant-id common \
+  --onedrive-root-path Apps/telejournal \
+  --onedrive-batch-window-seconds 60 \
+  --allowed-user-ids 123456,987654
+```
+
+When using `onedrive`, writes and media uploads are queued in-memory and
+flushed in bursts every `batch_window_seconds` (default: `60`).
+
+For first-time setup, only `--onedrive-client-id` and
+`--onedrive-client-secret` are required. On startup, telejournal sends OneDrive
+device authorization instructions to allowed chats. Complete the browser flow,
+then run `/onedriveauth complete` to capture and persist tokens.
+
+Useful OneDrive auth commands:
+
+- `/onedriveauth` or `/onedriveauth status` Show current authorization details
+- `/onedriveauth start` Start/restart the device code flow
+- `/onedriveauth complete` Poll once to finish authorization and persist tokens
+
 ### Telegram Commands
 
 After the bot is running, these commands are available in your private chat:
@@ -151,6 +180,7 @@ After the bot is running, these commands are available in your private chat:
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
 - `/settings` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, `prompt_for_mood_if_missing`, and `bot_menu_enabled`
+- `/onedriveauth [start|complete|status]` OneDrive device authorization workflow
   - Changes are persisted immediately.
   - If the bot started from a YAML config file, that file is backed up and updated.
   - If no YAML config was used, `./config.yaml` is created/updated.
@@ -199,6 +229,16 @@ STORAGE_OBSIDIAN_VAULT_ROOT=/path/to/obsidian/vault
   - `STORAGE_GITHUB_PATH_PREFIX` (optional)
   - `STORAGE_GITHUB_API_BASE_URL` (default: `https://api.github.com`)
   - `STORAGE_GITHUB_BATCH_WINDOW_SECONDS` (default: `60`)
+- OneDrive provider variables:
+  - `STORAGE_ONEDRIVE_TENANT_ID` (default: `common`)
+  - `STORAGE_ONEDRIVE_CLIENT_ID` (required for `onedrive`)
+  - `STORAGE_ONEDRIVE_CLIENT_SECRET` (required for `onedrive`)
+  - `STORAGE_ONEDRIVE_ROOT_PATH` (default: `Apps/telejournal`)
+  - `STORAGE_ONEDRIVE_API_BASE_URL` (default: `https://graph.microsoft.com/v1.0`)
+  - `STORAGE_ONEDRIVE_BATCH_WINDOW_SECONDS` (default: `60`)
+  - `STORAGE_ONEDRIVE_ACCESS_TOKEN` (optional cached access token)
+  - `STORAGE_ONEDRIVE_REFRESH_TOKEN` (optional cached refresh token)
+  - `STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC` (optional UTC expiry `YYYY-MM-DDTHH:MM:SSZ`)
 
 For `github_repo`, use a fine-grained personal access token scoped to exactly one target repository, with `Contents` read/write permissions.
 
@@ -232,7 +272,7 @@ allowed_user_ids:
   - 123456
   - 987654
 storage:
-  provider: obsidian_vault # obsidian_vault or github_repo
+  provider: obsidian_vault # obsidian_vault, github_repo, or onedrive
   obsidian_vault:
     root: /path/to/obsidian/vault
     secure_file_permissions: true
@@ -244,6 +284,16 @@ storage:
     path_prefix: ""
     api_base_url: https://api.github.com
     batch_window_seconds: 60
+  onedrive:
+    tenant_id: common
+    client_id: "${STORAGE_ONEDRIVE_CLIENT_ID}"
+    client_secret: "${STORAGE_ONEDRIVE_CLIENT_SECRET}"
+    root_path: Apps/telejournal
+    api_base_url: https://graph.microsoft.com/v1.0
+    batch_window_seconds: 60
+    access_token: "${STORAGE_ONEDRIVE_ACCESS_TOKEN}"
+    refresh_token: "${STORAGE_ONEDRIVE_REFRESH_TOKEN}"
+    token_expires_at_utc: "${STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC}"
 log_level: INFO
 message_timestamp_window_seconds: 60
 daily_brief_time_utc: "0"
@@ -257,7 +307,7 @@ bot_menu_enabled: true
 - `telegram_token` (required) - Your Telegram bot token
 - `allowed_user_ids` (required) - List of Telegram user IDs that can use the bot
 - `storage` (required) - Hierarchical storage provider configuration
-  - `storage.provider` - `obsidian_vault` or `github_repo`
+  - `storage.provider` - `obsidian_vault`, `github_repo`, or `onedrive`
   - `storage.obsidian_vault.root` - Filesystem root for vault storage
   - `storage.obsidian_vault.secure_file_permissions` - Restrictive perms toggle for vault storage
   - `storage.github_repo.owner` - GitHub owner/org
@@ -267,6 +317,15 @@ bot_menu_enabled: true
   - `storage.github_repo.path_prefix` - Optional sub-folder inside the repository
   - `storage.github_repo.api_base_url` - API base URL (default `https://api.github.com`)
   - `storage.github_repo.batch_window_seconds` - In-memory queue flush window in seconds (default `60`)
+  - `storage.onedrive.tenant_id` - Microsoft tenant ID (default `common`)
+  - `storage.onedrive.client_id` - Microsoft app client ID
+  - `storage.onedrive.client_secret` - Microsoft app client secret
+  - `storage.onedrive.root_path` - Root folder path inside OneDrive (default `Apps/telejournal`)
+  - `storage.onedrive.api_base_url` - Graph API base URL (default `https://graph.microsoft.com/v1.0`)
+  - `storage.onedrive.batch_window_seconds` - In-memory queue flush window in seconds (default `60`)
+  - `storage.onedrive.access_token` - Cached access token (optional)
+  - `storage.onedrive.refresh_token` - Cached refresh token (optional)
+  - `storage.onedrive.token_expires_at_utc` - Access token UTC expiry in `YYYY-MM-DDTHH:MM:SSZ` format (optional)
 - `log_level` (optional, default: `INFO`) - Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `message_timestamp_window_seconds` (optional, default: `60`) - Messages within this window share the same timestamp
 - `daily_brief_time_utc` (optional, default: `09:00`) - Daily UTC time for the historical same-day brief (`HH:MM` or `HH:MM:SS`), or `0` to disable

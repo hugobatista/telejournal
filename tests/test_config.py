@@ -10,6 +10,7 @@ import pytest
 from telejournal.config import (
     STORAGE_PROVIDER_GITHUB,
     STORAGE_PROVIDER_OBSIDIAN,
+    STORAGE_PROVIDER_ONEDRIVE,
     _merge_configs,
     _normalize_allowed_user_ids,
     _parse_allowed_user_ids,
@@ -178,6 +179,142 @@ def test_load_settings_rejects_invalid_storage_provider(
     monkeypatch.setenv("STORAGE_PROVIDER", "unknown")
 
     with pytest.raises(ValueError, match="storage.provider"):
+        load_settings()
+
+
+def test_load_settings_onedrive_provider_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive provider should parse required and optional values."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_TENANT_ID", "common")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "Apps/telejournal")
+    monkeypatch.setenv(
+        "STORAGE_ONEDRIVE_API_BASE_URL",
+        "https://graph.microsoft.com/v1.0",
+    )
+    monkeypatch.setenv("STORAGE_ONEDRIVE_BATCH_WINDOW_SECONDS", "90")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ACCESS_TOKEN", "access")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_REFRESH_TOKEN", "refresh")
+    monkeypatch.setenv(
+        "STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC",
+        "2026-03-28T10:00:00Z",
+    )
+
+    settings = load_settings()
+    assert settings.storage_provider == STORAGE_PROVIDER_ONEDRIVE
+    assert settings.onedrive_client_id == "client-id"
+    assert settings.onedrive_client_secret == "client-secret"
+    assert settings.onedrive_tenant_id == "common"
+    assert settings.onedrive_root_path == "Apps/telejournal"
+    assert settings.onedrive_batch_window_seconds == 90
+    assert settings.onedrive_access_token == "access"
+    assert settings.onedrive_refresh_token == "refresh"
+
+
+def test_load_settings_onedrive_requires_client_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive provider should require storage.onedrive.client_id."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "Apps/telejournal")
+    monkeypatch.delenv("STORAGE_ONEDRIVE_CLIENT_ID", raising=False)
+
+    with pytest.raises(ValueError, match="storage.onedrive.client_id"):
+        load_settings()
+
+
+def test_load_settings_onedrive_rejects_invalid_batch_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive provider should reject batch windows below one second."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "Apps/telejournal")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_BATCH_WINDOW_SECONDS", "0")
+
+    with pytest.raises(ValueError, match="storage.onedrive.batch_window_seconds"):
+        load_settings()
+
+
+def test_load_settings_onedrive_rejects_invalid_token_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive token expiry should use strict UTC timestamp format."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "Apps/telejournal")
+    monkeypatch.setenv(
+        "STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC",
+        "2026/03/28 10:00",
+    )
+
+    with pytest.raises(ValueError, match="token_expires_at_utc"):
+        load_settings()
+
+
+def test_load_settings_onedrive_tenant_falls_back_to_common(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """OneDrive tenant should fall back to common when explicitly blank."""
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "\n".join(
+            [
+                "telegram_token: token",
+                "allowed_user_ids: [1]",
+                "storage:",
+                "  provider: onedrive",
+                "  onedrive:",
+                "    tenant_id: ''",
+                "    client_id: client-id",
+                "    client_secret: client-secret",
+                "    root_path: Apps/telejournal",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("STORAGE_PROVIDER", raising=False)
+
+    settings = load_settings(config_path=yaml_path)
+    assert settings.onedrive_tenant_id == "common"
+
+
+def test_load_settings_onedrive_rejects_empty_root_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive provider should reject empty normalized root paths."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "/")
+
+    with pytest.raises(ValueError, match="storage.onedrive.root_path"):
+        load_settings()
+
+
+def test_load_settings_onedrive_requires_client_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive provider should require storage.onedrive.client_secret."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "Apps/telejournal")
+    monkeypatch.delenv("STORAGE_ONEDRIVE_CLIENT_SECRET", raising=False)
+
+    with pytest.raises(ValueError, match="storage.onedrive.client_secret"):
         load_settings()
 
 

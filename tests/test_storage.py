@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,8 @@ from telejournal.config import Settings
 from telejournal.storage import (
     GitHubRepository,
     NoteData,
+    OneDriveAuthorizationRequiredError,
+    OneDriveRepository,
     VaultRepository,
     build_repository,
 )
@@ -593,6 +596,51 @@ def test_build_repository_rejects_incomplete_github_settings() -> None:
         vault_root=Path("."),
         allowed_user_ids={1},
         storage_provider="github_repo",
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        build_repository(settings)
+
+
+def test_build_repository_onedrive_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Factory should build OneDrive repository for onedrive settings."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_client_id="client-id",
+        onedrive_client_secret="client-secret",
+        onedrive_root_path="Apps/telejournal",
+    )
+
+    repo = build_repository(settings)
+    assert isinstance(repo, OneDriveRepository)
+
+
+def test_build_repository_rejects_incomplete_onedrive_settings() -> None:
+    """Factory should reject incomplete onedrive provider configuration."""
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_client_id=None,
+        onedrive_client_secret="client-secret",
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        build_repository(settings)
+
+
+def test_build_repository_rejects_missing_onedrive_client_secret() -> None:
+    """Factory should reject onedrive provider when client secret is missing."""
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_client_id="client-id",
+        onedrive_client_secret=None,
     )
     with pytest.raises(ValueError, match="incomplete"):
         build_repository(settings)
@@ -1321,3 +1369,422 @@ async def test_github_repository_flush_requeues_delete_when_no_pending_put(
     await repo.flush_pending(reason="test")
 
     assert "2026/2026-03-10.md" in repo._pending_deletes
+
+
+def test_onedrive_auth_workflow_and_token_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """OneDrive auth flow should guide first-run setup and persist tokens."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("storage:\n  provider: onedrive\n", encoding="utf-8")
+
+    initial_device_payload = {
+        "device_code": "device-1",
+        "user_code": "ABCD-EFGH",
+        "verification_uri": "https://microsoft.com/devicelogin",
+        "verification_uri_complete": "https://microsoft.com/devicelogin?x=1",
+        "expires_in": 900,
+    }
+
+    monkeypatch.setattr(
+        OneDriveRepository,
+        "_request_device_code",
+        lambda _self: dict(initial_device_payload),
+    )
+
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+        config_path=config_path,
+    )
+
+    status = repo.build_authorization_instructions()
+    assert status is not None
+    assert "ABCD-EFGH" in status
+    assert "/onedriveauth complete" in status
+
+    poll_results = [
+        {"error": "authorization_pending"},
+        {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        },
+    ]
+
+    def _poll_once(_payload: dict[str, str]) -> dict[str, Any]:
+        return poll_results.pop(0)
+
+    monkeypatch.setattr(repo, "_request_form_token", _poll_once)
+
+    pending = repo.complete_device_authorization()
+    assert "still pending" in pending
+
+    success = repo.complete_device_authorization()
+    assert "completed successfully" in success
+    assert repo.is_authorized()
+    assert repo.build_authorization_instructions() is None
+
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert persisted["storage"]["onedrive"]["client_secret"] == "client-secret"
+    assert persisted["storage"]["onedrive"]["access_token"] == "new-access"
+    assert persisted["storage"]["onedrive"]["refresh_token"] == "new-refresh"
+
+
+def test_onedrive_auth_error_and_refresh_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auth helpers should raise actionable guidance when refresh cannot be used."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+
+    device_payload = {
+        "device_code": "device-2",
+        "user_code": "ZZZZ-1111",
+        "verification_uri": "https://microsoft.com/devicelogin",
+        "expires_in": 900,
+    }
+    monkeypatch.setattr(repo, "_request_device_code", lambda: dict(device_payload))
+    repo._refresh_token = "refresh"
+    monkeypatch.setattr(
+        repo,
+        "_refresh_access_token",
+        lambda: (_ for _ in ()).throw(RuntimeError("expired refresh")),
+    )
+
+    with pytest.raises(OneDriveAuthorizationRequiredError, match="ZZZZ-1111"):
+        repo._ensure_auth_for_request()
+
+    repo._device_code_payload = dict(device_payload)
+    repo._device_code_expires_at = datetime.now(UTC)
+    refreshed = repo.start_device_authorization()
+    assert "OneDrive authorization is required" in refreshed
+
+
+def test_onedrive_request_form_token_http_error_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Token helper should parse OAuth JSON errors from HTTP failures."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+
+    http_json_error = urllib_error.HTTPError(
+        url="https://x",
+        code=400,
+        msg="bad",
+        hdrs=None,
+        fp=io.BytesIO(b'{"error":"authorization_pending"}'),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_json_error),
+    )
+    payload = repo._request_form_token({"x": "y"})
+    assert payload["error"] == "authorization_pending"
+
+    http_non_json = urllib_error.HTTPError(
+        url="https://x",
+        code=500,
+        msg="boom",
+        hdrs=None,
+        fp=io.BytesIO(b"server error"),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_non_json),
+    )
+    with pytest.raises(RuntimeError, match="token request failed"):
+        repo._request_form_token({"x": "y"})
+
+
+@pytest.mark.asyncio
+async def test_onedrive_repository_note_and_media_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive repository should support note CRUD, history, and media paths."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+    monkeypatch.setattr(repo, "_ensure_flush_task", lambda: None)
+
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    files: dict[str, bytes] = {}
+    folders: set[str] = {"Apps", "Apps/telejournal", "Apps/telejournal/2025"}
+
+    def _get_item(repo_path: str) -> dict[str, Any] | None:
+        if repo_path in folders:
+            return {"name": repo_path.rsplit("/", maxsplit=1)[-1], "folder": {}}
+        if repo_path in files:
+            return {
+                "name": repo_path.rsplit("/", maxsplit=1)[-1],
+                "eTag": "etag-1",
+            }
+        return None
+
+    def _get_content(repo_path: str) -> bytes | None:
+        return files.get(repo_path)
+
+    def _put_content(repo_path: str, payload: bytes) -> None:
+        parent = "/".join(repo_path.split("/")[:-1]).strip("/")
+        if parent:
+            folders.add(parent)
+        files[repo_path] = payload
+
+    def _delete_content(repo_path: str) -> bool:
+        files.pop(repo_path, None)
+        return True
+
+    monkeypatch.setattr(repo, "_get_item", _get_item)
+    monkeypatch.setattr(repo, "_get_content", _get_content)
+    monkeypatch.setattr(repo, "_put_content", _put_content)
+    monkeypatch.setattr(repo, "_delete_content", _delete_content)
+
+    note_path = repo._repo_path(repo._note_relpath(note_dt))
+
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nhello")
+    assert note_path not in files
+
+    fm = await repo.get_note_frontmatter(note_dt)
+    assert fm["tags"] == ["journal"]
+
+    await repo.flush_pending(reason="test")
+    assert note_path in files
+
+    content = await repo.get_note_content(note_dt)
+    assert content is not None
+    assert "hello" in content
+
+    await repo.update_frontmatter(note_dt, {"mood": 5})
+    assert await repo.note_has_mood(note_dt)
+    assert await repo.note_has_entry(note_dt)
+
+    marker = "1:10"
+    await repo.append_entry(
+        note_dt,
+        "\n".join(
+            [
+                "%% 18:34:42 %%",
+                marker_start_comment(marker),
+                "old text",
+                marker_end_comment(marker),
+            ]
+        ),
+    )
+    updated = await repo.update_marked_entry(note_dt, marker, "new text")
+    assert updated
+    assert not await repo.update_marked_entry(note_dt, "missing", "new")
+
+    await repo.append_entry(note_dt, "%% 18:35:00 %%\nsecond")
+    assert await repo.peek_last_entry(note_dt) == "%% 18:35:00 %%\nsecond"
+    removed = await repo.delete_last_entry(note_dt)
+    assert removed == "%% 18:35:00 %%\nsecond"
+
+    last_time = await repo.get_last_entry_time(note_dt)
+    assert last_time == datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    previous_dt = datetime(2025, 3, 7, 1, 0, 0, tzinfo=UTC)
+    previous_path = repo._repo_path(repo._note_relpath(previous_dt))
+    files[previous_path] = b"---\nmood: null\n---\n\nfrom history\n"
+
+    monkeypatch.setattr(
+        repo,
+        "_list_children",
+        lambda _root: [{"folder": {}, "name": "2025"}],
+    )
+    history = await repo.get_same_day_previous_year_notes(note_dt)
+    assert [item[0].year for item in history] == [2025]
+
+    assert await repo.delete_day(note_dt)
+    assert not await repo.delete_day(note_dt)
+
+    photo_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"p"))
+    photo = SimpleNamespace(get_file=AsyncMock(return_value=photo_file))
+    voice_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"v"))
+    voice = SimpleNamespace(get_file=AsyncMock(return_value=voice_file))
+    video_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"m"))
+    video = SimpleNamespace(get_file=AsyncMock(return_value=video_file))
+    note_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"n"))
+    video_note = SimpleNamespace(get_file=AsyncMock(return_value=note_file))
+
+    await repo.save_photo(photo, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.save_voice(voice, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.save_video(video, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.save_video_note(video_note, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.flush_pending(reason="media")
+
+    attachment = await repo.get_attachment_bytes("2026/attachments/20260307_183442.jpg")
+    assert attachment == b"p"
+
+
+def test_onedrive_request_helpers_and_path_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive low-level request and path helpers should handle edge cases."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+    monkeypatch.setattr(
+        repo,
+        "_build_headers",
+        lambda **_k: {"Authorization": "x"},
+    )
+
+    class _JsonResp:
+        def __enter__(self) -> "_JsonResp":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"ok": true}'
+
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: _JsonResp(),
+    )
+    assert repo._request_json("GET", "/x") == {"ok": True}
+
+    class _EmptyResp:
+        def __enter__(self) -> "_EmptyResp":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b""
+
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: _EmptyResp(),
+    )
+    assert repo._request_json("GET", "/x") is None
+
+    http_404 = urllib_error.HTTPError(
+        url="http://x",
+        code=404,
+        msg="not found",
+        hdrs=None,
+        fp=None,
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_404),
+    )
+    assert repo._request_json("GET", "/x", allow_not_found=True) is None
+    with pytest.raises(RuntimeError, match="OneDrive API request failed"):
+        repo._request_json("GET", "/x")
+
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("down")),
+    )
+    with pytest.raises(RuntimeError, match="OneDrive API request failed"):
+        repo._request_json("GET", "/x")
+
+    class _BytesResp:
+        def __enter__(self) -> "_BytesResp":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"raw"
+
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: _BytesResp(),
+    )
+    assert repo._request_bytes("GET", "/x") == b"raw"
+
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_404),
+    )
+    assert repo._request_bytes("GET", "/x", allow_not_found=True) is None
+
+    http_401 = urllib_error.HTTPError(
+        url="http://x",
+        code=401,
+        msg="unauthorized",
+        hdrs=None,
+        fp=io.BytesIO(b'{"error":{"code":"unauthenticated","message":"bad"}}'),
+    )
+    monkeypatch.setattr(
+        repo,
+        "_try_refresh_after_unauthorized",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        repo,
+        "_authorization_required_error",
+        lambda: OneDriveAuthorizationRequiredError("auth required"),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_401),
+    )
+    with pytest.raises(OneDriveAuthorizationRequiredError):
+        repo._request_bytes("GET", "/x")
+
+    http_302 = urllib_error.HTTPError(
+        url="http://x",
+        code=302,
+        msg="redirect",
+        hdrs={"Location": "https://download.example/file"},
+        fp=None,
+    )
+
+    class _RedirectOpener:
+        def open(self, *_a: object, **_k: object) -> Any:
+            return (_ for _ in ()).throw(http_302)
+
+    graph_log_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "telejournal.storage.urllib_request.build_opener",
+        lambda *_a, **_k: _RedirectOpener(),
+    )
+    monkeypatch.setattr(repo, "_request_download_bytes", lambda _u: b"redirected")
+    monkeypatch.setattr(
+        repo,
+        "_log_graph_http_error",
+        lambda **kwargs: graph_log_calls.append(kwargs),
+    )
+    assert repo._request_content_via_redirect("/x") == b"redirected"
+    assert graph_log_calls == []
+
+    monkeypatch.setattr(repo, "_request_json", lambda *_a, **_k: {"id": "1"})
+    monkeypatch.setattr(repo, "_request_content_via_redirect", lambda _e: b"via302")
+    assert repo._get_content("a/b.md") == b"via302"
+
+    assert repo._path_endpoint("", content=False) == "/me/drive/root"
+    assert repo._path_endpoint("a/b", content=True) == "/me/drive/root:/a/b:/content"
+    assert repo._children_endpoint("") == "/me/drive/root/children"
+    assert repo._children_endpoint("a/b") == "/me/drive/root:/a/b:/children"
+    assert (
+        repo._repo_path("2026/2026-03-07.md") == "Apps/telejournal/2026/2026-03-07.md"
+    )
