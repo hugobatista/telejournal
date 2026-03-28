@@ -368,6 +368,53 @@ def test_load_settings_google_drive_provider_with_missing_node(
         load_settings(config_path=yaml_path)
 
 
+def test_load_settings_google_drive_requires_client_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Google Drive provider should require client secret configuration."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "google_drive")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.delenv("STORAGE_GOOGLE_DRIVE_CLIENT_SECRET", raising=False)
+
+    with pytest.raises(ValueError, match="storage.google_drive.client_secret"):
+        load_settings()
+
+
+def test_load_settings_google_drive_rejects_invalid_batch_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Google Drive provider should reject batch windows below one second."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "google_drive")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_BATCH_WINDOW_SECONDS", "0")
+
+    with pytest.raises(
+        ValueError,
+        match="storage.google_drive.batch_window_seconds",
+    ):
+        load_settings()
+
+
+def test_load_settings_google_drive_rejects_invalid_token_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Google Drive token expiry should use strict UTC timestamp format."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "google_drive")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv(
+        "STORAGE_GOOGLE_DRIVE_TOKEN_EXPIRES_AT_UTC",
+        "2026/03/28 10:00",
+    )
+
+    with pytest.raises(ValueError, match="storage.google_drive.token_expires_at_utc"):
+        load_settings()
+
+
 def test_load_settings_defaults_and_yaml_cli_priority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

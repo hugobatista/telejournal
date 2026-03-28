@@ -222,3 +222,33 @@ def test_persist_runtime_settings_serializes_onedrive_storage(
     assert payload["storage"]["onedrive"]["client_secret"] == "client-secret"
     assert payload["storage"]["onedrive"]["root_path"] == "Apps/telejournal"
     assert payload["storage"]["onedrive"]["batch_window_seconds"] == 90
+
+
+def test_persist_runtime_settings_serializes_google_drive_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persistence should keep google drive storage configuration hierarchy."""
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(
+        telegram_token="token",
+        vault_root=tmp_path,
+        allowed_user_ids={1},
+        storage_provider="google_drive",
+        google_drive_client_id="client-id",
+        google_drive_client_secret="client-secret",
+        google_drive_folder_id="folder-id",
+        google_drive_batch_window_seconds=75,
+        google_drive_access_token="access",
+        google_drive_refresh_token="refresh",
+        google_drive_token_expires_at_utc="2026-03-28T10:00:00Z",
+    )
+
+    _persisted, target_path, _backup_path = persist_runtime_settings(settings)
+    payload = yaml.safe_load(target_path.read_text(encoding="utf-8"))
+
+    assert payload["storage"]["provider"] == "google_drive"
+    assert payload["storage"]["google_drive"]["client_id"] == "client-id"
+    assert payload["storage"]["google_drive"]["client_secret"] == "client-secret"
+    assert payload["storage"]["google_drive"]["folder_id"] == "folder-id"
+    assert payload["storage"]["google_drive"]["batch_window_seconds"] == 75

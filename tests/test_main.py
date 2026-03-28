@@ -462,6 +462,52 @@ def test_run_command_verbose_emits_onedrive_storage_summary(
     assert any("OneDrive batch window" in message for message in fake_output.messages)
 
 
+def test_run_command_verbose_emits_google_drive_storage_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verbose mode should include Google Drive storage summary when configured."""
+    settings = Settings(
+        "token",
+        tmp_path,
+        {1},
+        log_level="DEBUG",
+        storage_provider="google_drive",
+        google_drive_client_id="client-id",
+        google_drive_client_secret="client-secret",
+        google_drive_folder_id="folder-id",
+        google_drive_batch_window_seconds=75,
+    )
+
+    class _FakeOutput:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def info(self, message: str, echo: bool = False) -> None:
+            del echo
+            self.messages.append(message)
+
+        def error(self, message: str, echo: bool = False) -> None:
+            del echo
+            self.messages.append(message)
+
+    fake_output = _FakeOutput()
+    monkeypatch.setattr(main_module, "OutputHandler", lambda: fake_output)
+    monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+    monkeypatch.setattr(main_module, "setup_default_logging", lambda: None)
+    monkeypatch.setattr(main_module, "setup_logging", lambda _l, verbose: None)
+    monkeypatch.setattr(main_module, "load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr(main_module, "_start_bot", lambda _t, _s: None)
+
+    result = RUNNER.invoke(main_module.app, ["run", "--verbose"])
+
+    assert result.exit_code == 0
+    assert any("Storage: google_drive" in message for message in fake_output.messages)
+    assert any(
+        "Google Drive batch window" in message for message in fake_output.messages
+    )
+
+
 def test_run_command_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """CLI run should exit non-zero on configuration errors."""
     monkeypatch.setattr(main_module, "load_dotenv", lambda: None)

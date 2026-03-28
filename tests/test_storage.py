@@ -647,6 +647,43 @@ def test_build_repository_rejects_missing_onedrive_client_secret() -> None:
         build_repository(settings)
 
 
+def test_build_repository_google_drive_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Factory should build Google Drive repository for google_drive settings."""
+    monkeypatch.setattr(
+        GoogleDriveRepository,
+        "_initialize_auth_state",
+        lambda _s: None,
+    )
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="google_drive",
+        google_drive_client_id="client-id",
+        google_drive_client_secret="client-secret",
+        google_drive_folder_id="folder-id",
+    )
+
+    repo = build_repository(settings)
+    assert isinstance(repo, GoogleDriveRepository)
+
+
+def test_build_repository_rejects_incomplete_google_drive_settings() -> None:
+    """Factory should reject incomplete google drive provider configuration."""
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="google_drive",
+        google_drive_client_id="client-id",
+        google_drive_client_secret=None,
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        build_repository(settings)
+
+
 def test_build_repository_rejects_unknown_provider(tmp_path: Path) -> None:
     """Factory should reject unsupported providers."""
     settings = Settings(
