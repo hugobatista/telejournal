@@ -105,7 +105,16 @@ def resolve_config_path(config_path: Path | None) -> Path | None:
     """Resolve config path to an absolute path when provided."""
     if config_path is None:
         return None
-    return config_path.expanduser().resolve()
+    expanded = config_path.expanduser()
+    path_str = str(expanded)
+
+    # Keep file-descriptor-backed paths intact (for example /dev/fd/9).
+    # Dereferencing them can produce non-openable targets like
+    # /proc/<pid>/fd/pipe:[inode].
+    if path_str.startswith("/dev/fd/") or "/fd/pipe:[" in path_str:
+        return expanded
+
+    return expanded.resolve()
 
 
 def normalize_onedrive_root_path(raw_value: Any) -> str:

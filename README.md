@@ -235,6 +235,20 @@ and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run):
 secret-tool-run telejournal run
 ```
 
+
+Instead of using env file variables, you can also keep those secrets in a yaml format and use secret-tool-run with it:
+
+```bash
+secret-tool-run --file config.yaml uv run telejournal run config.yaml --verbose
+```
+
+You even avoid the creation of config.yaml at all and use a file descriptor:
+
+```bash
+secret-tool-run uv run telejournal run @SECRETS@  --verbose
+```
+Where `SECRETS` is a file descriptor containing the yaml configuration.
+
 ## Environment
 
 Create a `.env` file:

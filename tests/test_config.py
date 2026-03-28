@@ -17,6 +17,7 @@ from telejournal.config import (
     _parse_allowed_user_ids,
     _parse_daily_brief_time_utc,
     _parse_tag_choices,
+    _resolve_config_path,
     load_settings,
 )
 
@@ -593,3 +594,25 @@ def test_merge_configs_ignores_none_and_merges_nested() -> None:
     assert merged["storage"]["provider"] == "obsidian_vault"
     assert merged["storage"]["obsidian_vault"]["root"] == "/a"
     assert merged["storage"]["obsidian_vault"]["secure_file_permissions"] is False
+
+
+def test_resolve_config_path_resolves_regular_paths(tmp_path: Path) -> None:
+    """Regular config paths should resolve to absolute canonical paths."""
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    config_file = nested_dir / "config.yaml"
+    config_file.write_text("telegram_token: token\n", encoding="utf-8")
+
+    resolved = _resolve_config_path(config_file)
+
+    assert resolved is not None
+    assert resolved == config_file.resolve()
+
+
+def test_resolve_config_path_preserves_dev_fd_paths() -> None:
+    """/dev/fd paths should be preserved for descriptor-backed config input."""
+    fd_path = Path("/dev/fd/9")
+
+    resolved = _resolve_config_path(fd_path)
+
+    assert resolved == fd_path
