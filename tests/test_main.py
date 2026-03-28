@@ -57,17 +57,13 @@ class _FakeApplication:
 class _FakeJournalBot:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.handlers_registered = False
-        self.jobs_registered = False
         self.shutdown_called = False
 
     def register_handlers(self, application: object) -> None:
         del application
-        self.handlers_registered = True
 
     def register_jobs(self, job_queue: object) -> None:
         del job_queue
-        self.jobs_registered = True
 
     async def shutdown(self) -> None:
         self.shutdown_called = True
