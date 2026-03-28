@@ -26,6 +26,10 @@ dev = [
 [project.scripts]
 telejournal = "telejournal.main:run"
 
+[tool.uv]
+exclude-newer = "30 days"
+
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
