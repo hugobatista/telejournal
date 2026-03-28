@@ -15,6 +15,13 @@ applyTo: '**/*.py'
 [tool.uv]
 exclude-newer = "30 days"
 ```
+- Packages are a good way to organize code and manage dependencies. Avoid monolithic files and break down the code into smaller, more manageable modules. Avoid modules > 500 lines of code and use packages instead of prefixing modules with the same name.
+
+
+## Coverage and testing
+- unit tests should always be included for new features and bug fixes. 
+- coverage should be maintained at a high level, and always work for the 100% of the codebase.
+- avoid "pragma: no cover" at all cost. If you find yourself needing to use it, consider refactoring the code to make it more testable instead.
 
 
 
