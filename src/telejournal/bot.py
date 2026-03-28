@@ -666,13 +666,13 @@ class JournalBot:
         """Start guided runtime configuration for supported settings."""
         await self._commands.settings_command(update, context)
 
-    async def onedriveauth_command(
+    async def storageauth_command(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Run OneDrive authorization workflow using device-code flow."""
-        await self._commands.onedriveauth_command(update, context)
+        await self._commands.storageauth_command(update, context)
 
     async def _record_entry(
         self,

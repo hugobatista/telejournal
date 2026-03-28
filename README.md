@@ -155,13 +155,13 @@ flushed in bursts every `batch_window_seconds` (default: `60`).
 For first-time setup, only `--onedrive-client-id` and
 `--onedrive-client-secret` are required. On startup, telejournal sends OneDrive
 device authorization instructions to allowed chats. Complete the browser flow,
-then run `/onedriveauth complete` to capture and persist tokens.
+then run `/storageauth complete` to capture and persist tokens.
 
 Useful OneDrive auth commands:
 
-- `/onedriveauth` or `/onedriveauth status` Show current authorization details
-- `/onedriveauth start` Start/restart the device code flow
-- `/onedriveauth complete` Poll once to finish authorization and persist tokens
+- `/storageauth` or `/storageauth status` Show current authorization details
+- `/storageauth start` Start/restart the device code flow
+- `/storageauth complete` Poll once to finish authorization and persist tokens
 
 ### Telegram Commands
 
@@ -180,7 +180,7 @@ After the bot is running, these commands are available in your private chat:
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
 - `/settings` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, `prompt_for_mood_if_missing`, and `bot_menu_enabled`
-- `/onedriveauth [start|complete|status]` OneDrive device authorization workflow (only when `storage.provider` is `onedrive`)
+- `/storageauth [start|complete|status]` OneDrive device authorization workflow (only when `storage.provider` is `onedrive`)
   - Changes are persisted immediately.
   - If the bot started from a YAML config file, that file is backed up and updated.
   - If no YAML config was used, `./config.yaml` is created/updated.

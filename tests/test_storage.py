@@ -1404,7 +1404,7 @@ def test_onedrive_auth_workflow_and_token_persistence(
     status = repo.build_authorization_instructions()
     assert status is not None
     assert "ABCD-EFGH" in status
-    assert "/onedriveauth complete" in status
+    assert "/storageauth complete" in status
 
     poll_results = [
         {"error": "authorization_pending"},

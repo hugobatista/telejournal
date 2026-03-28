@@ -303,7 +303,7 @@ class OneDriveRepository:  # pragma: no cover
             details.append(
                 (
                     "Open the verification URL, complete login, then run "
-                    "/onedriveauth complete to capture tokens."
+                    "/storageauth complete to capture tokens."
                 )
             )
         if verification_uri_complete:
@@ -311,7 +311,7 @@ class OneDriveRepository:  # pragma: no cover
         if verification_uri and user_code:
             details.append(f"Verification URL: {verification_uri}")
             details.append(f"User code: {user_code}")
-        details.append("Use /onedriveauth start to restart authorization.")
+        details.append("Use /storageauth start to restart authorization.")
 
         return "\n".join(details)
 
@@ -373,7 +373,7 @@ class OneDriveRepository:  # pragma: no cover
                 if error_code in {"authorization_pending", "slow_down"}:
                     return (
                         "Authorization is still pending. Complete the login in the "
-                        "browser and run /onedriveauth complete again."
+                        "browser and run /storageauth complete again."
                     )
                 if error_code in {
                     "authorization_declined",
@@ -384,7 +384,7 @@ class OneDriveRepository:  # pragma: no cover
                     self._device_code_expires_at = None
                     return (
                         "Device authorization expired or was declined. "
-                        "Run /onedriveauth start to generate a new code."
+                        "Run /storageauth start to generate a new code."
                     )
                 description = str(token_payload.get("error_description") or "").strip()
                 raise RuntimeError(
@@ -546,7 +546,7 @@ class OneDriveRepository:  # pragma: no cover
         if instructions is None:
             instructions = (
                 "OneDrive authorization is required. "
-                "Use /onedriveauth [start|complete|status]."
+                "Use /storageauth [start|complete|status]."
             )
         return OneDriveAuthorizationRequiredError(instructions)
 

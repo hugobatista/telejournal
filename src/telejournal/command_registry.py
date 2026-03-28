@@ -65,9 +65,9 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         help_line="/settings  Guided runtime configuration",
     ),
     CommandSpec(
-        command="onedriveauth",
-        callback_name="onedriveauth_command",
-        help_line="/onedriveauth [start|complete|status]  OneDrive device auth workflow",
+        command="storageauth",
+        callback_name="storageauth_command",
+        help_line="/storageauth [start|complete|status]  OneDrive device auth workflow",
         provider_scope=frozenset({STORAGE_PROVIDER_ONEDRIVE}),
     ),
     CommandSpec(

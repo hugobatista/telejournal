@@ -306,7 +306,7 @@ class CommandHandlerService:
             reply_markup=self._config_keyboard(),
         )
 
-    async def onedriveauth_command(
+    async def storageauth_command(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
@@ -366,7 +366,7 @@ class CommandHandlerService:
 
             if action != "status":
                 await update.effective_message.reply_text(
-                    "Use /onedriveauth [start|complete|status]"
+                    "Use /storageauth [start|complete|status]"
                 )
                 return
 
