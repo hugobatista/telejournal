@@ -46,10 +46,6 @@ def load_env_config() -> dict[str, Any]:
     if token:
         config["telegram_token"] = token
 
-    vault_root = os.getenv("VAULT_ROOT", "").strip()
-    if vault_root:
-        config["vault_root"] = vault_root
-
     allowed_user_ids = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip()
     if allowed_user_ids:
         config["allowed_user_ids"] = allowed_user_ids
@@ -62,9 +58,69 @@ def load_env_config() -> dict[str, Any]:
     if window_seconds:
         config["message_timestamp_window_seconds"] = window_seconds
 
-    secure_permissions = os.getenv("SECURE_FILE_PERMISSIONS", "").strip()
-    if secure_permissions:
-        config["secure_file_permissions"] = secure_permissions
+    daily_brief_time_utc = os.getenv("DAILY_BRIEF_TIME_UTC", "").strip()
+    if daily_brief_time_utc:
+        config["daily_brief_time_utc"] = daily_brief_time_utc
+
+    tag_choices = os.getenv("TAG_CHOICES", "").strip()
+    if tag_choices:
+        config["tag_choices"] = tag_choices
+
+    prompt_for_mood_if_missing = os.getenv("PROMPT_FOR_MOOD_IF_MISSING", "").strip()
+    if prompt_for_mood_if_missing:
+        config["prompt_for_mood_if_missing"] = prompt_for_mood_if_missing
+
+    bot_menu_enabled = os.getenv("BOT_MENU_ENABLED", "").strip()
+    if bot_menu_enabled:
+        config["bot_menu_enabled"] = bot_menu_enabled
+
+    storage_provider = os.getenv("STORAGE_PROVIDER", "").strip()
+    obsidian_root = os.getenv("STORAGE_OBSIDIAN_VAULT_ROOT", "").strip()
+    obsidian_secure = os.getenv(
+        "STORAGE_OBSIDIAN_VAULT_SECURE_FILE_PERMISSIONS", ""
+    ).strip()
+    github_owner = os.getenv("STORAGE_GITHUB_OWNER", "").strip()
+    github_repo = os.getenv("STORAGE_GITHUB_REPO", "").strip()
+    github_branch = os.getenv("STORAGE_GITHUB_BRANCH", "").strip()
+    github_token = os.getenv("STORAGE_GITHUB_TOKEN", "").strip()
+    github_path_prefix = os.getenv("STORAGE_GITHUB_PATH_PREFIX", "").strip()
+    github_api_base_url = os.getenv("STORAGE_GITHUB_API_BASE_URL", "").strip()
+    github_batch_window_seconds = os.getenv(
+        "STORAGE_GITHUB_BATCH_WINDOW_SECONDS", ""
+    ).strip()
+
+    has_storage = any(
+        (
+            storage_provider,
+            obsidian_root,
+            obsidian_secure,
+            github_owner,
+            github_repo,
+            github_branch,
+            github_token,
+            github_path_prefix,
+            github_api_base_url,
+            github_batch_window_seconds,
+        )
+    )
+    if has_storage:
+        storage: dict[str, Any] = {
+            "provider": storage_provider or None,
+            "obsidian_vault": {
+                "root": obsidian_root or None,
+                "secure_file_permissions": obsidian_secure or None,
+            },
+            "github_repo": {
+                "owner": github_owner or None,
+                "repo": github_repo or None,
+                "branch": github_branch or None,
+                "token": github_token or None,
+                "path_prefix": github_path_prefix or None,
+                "api_base_url": github_api_base_url or None,
+                "batch_window_seconds": github_batch_window_seconds or None,
+            },
+        }
+        config["storage"] = storage
 
     expanded = expand_env_vars(config)
     return cast(dict[str, Any], expanded)

@@ -46,14 +46,29 @@ def test_load_yaml_config_empty_file(tmp_path: Path) -> None:
 def test_load_env_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Environment values should map into settings-compatible keys."""
     monkeypatch.setenv("TELEGRAM_TOKEN", "x")
-    monkeypatch.setenv("VAULT_ROOT", "/tmp/vault")
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1,2")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "09:00")
+    monkeypatch.setenv("TAG_CHOICES", "family,health")
+    monkeypatch.setenv("PROMPT_FOR_MOOD_IF_MISSING", "false")
+    monkeypatch.setenv("BOT_MENU_ENABLED", "false")
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", "/tmp/vault")
+    monkeypatch.setenv(
+        "STORAGE_OBSIDIAN_VAULT_SECURE_FILE_PERMISSIONS",
+        "false",
+    )
 
     config = load_env_config()
 
     assert config["telegram_token"] == "x"
-    assert config["vault_root"] == "/tmp/vault"
     assert config["allowed_user_ids"] == "1,2"
+    assert config["daily_brief_time_utc"] == "09:00"
+    assert config["tag_choices"] == "family,health"
+    assert config["prompt_for_mood_if_missing"] == "false"
+    assert config["bot_menu_enabled"] == "false"
+    assert config["storage"]["provider"] == "obsidian_vault"
+    assert config["storage"]["obsidian_vault"]["root"] == "/tmp/vault"
+    assert config["storage"]["obsidian_vault"]["secure_file_permissions"] == "false"
 
 
 def test_merge_configs_ignores_none() -> None:
@@ -64,3 +79,26 @@ def test_merge_configs_ignores_none() -> None:
     )
     assert merged["token"] == "default"
     assert merged["level"] == "DEBUG"
+
+
+def test_load_env_config_github_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub storage environment variables should map to nested config keys."""
+    monkeypatch.setenv("STORAGE_PROVIDER", "github_repo")
+    monkeypatch.setenv("STORAGE_GITHUB_OWNER", "acme")
+    monkeypatch.setenv("STORAGE_GITHUB_REPO", "journal")
+    monkeypatch.setenv("STORAGE_GITHUB_BRANCH", "dev")
+    monkeypatch.setenv("STORAGE_GITHUB_TOKEN", "token")
+    monkeypatch.setenv("STORAGE_GITHUB_PATH_PREFIX", "notes")
+    monkeypatch.setenv("STORAGE_GITHUB_API_BASE_URL", "https://api.github.com")
+    monkeypatch.setenv("STORAGE_GITHUB_BATCH_WINDOW_SECONDS", "90")
+
+    config = load_env_config()
+
+    assert config["storage"]["provider"] == "github_repo"
+    assert config["storage"]["github_repo"]["owner"] == "acme"
+    assert config["storage"]["github_repo"]["repo"] == "journal"
+    assert config["storage"]["github_repo"]["branch"] == "dev"
+    assert config["storage"]["github_repo"]["token"] == "token"
+    assert config["storage"]["github_repo"]["path_prefix"] == "notes"
+    assert config["storage"]["github_repo"]["api_base_url"] == "https://api.github.com"
+    assert config["storage"]["github_repo"]["batch_window_seconds"] == "90"

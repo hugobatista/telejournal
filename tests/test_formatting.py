@@ -6,7 +6,15 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from telejournal.formatting import (
+    AttachmentChunk,
     MOOD_LABELS,
+    NoteRenderPayload,
+    TG_ENTRY_END_TOKEN,
+    TG_ENTRY_START_TOKEN,
+    TextChunk,
+    format_timestamp_as_prefixed_quote,
+    marker_end_comment,
+    marker_start_comment,
     extract_reply_quote,
     format_mood_change_text,
     format_mood_saved_text,
@@ -18,6 +26,8 @@ from telejournal.formatting import (
     format_timestamp_marker,
     format_text_entry,
     render_message_markdown,
+    parse_note_render_payload,
+    strip_internal_tracking_markers,
 )
 
 
@@ -218,6 +228,118 @@ def test_format_with_quote_multiline() -> None:
     assert result == "> line 1\n> line 2\n> line 3\n\nreply"
 
 
+def test_parse_note_render_payload_without_embeds() -> None:
+    """Parser should keep plain notes as one text chunk."""
+    payload = parse_note_render_payload("hello\nworld")
+    assert payload == NoteRenderPayload(chunks=[TextChunk(text="hello\nworld")])
+
+
+def test_parse_note_render_payload_with_embeds() -> None:
+    """Parser should split text and embeds while preserving order."""
+    payload = parse_note_render_payload(
+        "head\n![[2026/attachments/a.jpg]]\nbody\n![[2026/attachments/b.ogg]]"
+    )
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="head\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/a.jpg"),
+            TextChunk(text="\nbody\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/b.ogg"),
+        ]
+    )
+
+
+def test_parse_note_render_payload_strips_alias_and_heading() -> None:
+    """Parser should normalize embed path by removing alias/heading suffixes."""
+    payload = parse_note_render_payload(
+        "![[2026/attachments/a.jpg|preview]]\n![[2026/attachments/b.mp4#t=00:03]]"
+    )
+    assert payload == NoteRenderPayload(
+        chunks=[
+            AttachmentChunk(attachment_rel="2026/attachments/a.jpg"),
+            TextChunk(text="\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/b.mp4"),
+        ]
+    )
+
+
+def test_strip_internal_tracking_markers() -> None:
+    """Internal Telegram marker comments should be removed from note text."""
+    marker = "6733378829:969"
+    content = (
+        "header\n"
+        f"{marker_start_comment(marker)}\n"
+        "body\n"
+        f"{marker_end_comment(marker)}\n"
+        "tail"
+    )
+    assert strip_internal_tracking_markers(content) == "header\nbody\ntail"
+
+
+def test_parse_note_render_payload_ignores_internal_tracking_markers() -> None:
+    """Render payload parser should not surface internal marker comments."""
+    marker = "6733378829:969"
+    content = (
+        f"{marker_start_comment(marker)}\n"
+        "hello\n"
+        "![[2026/attachments/a.jpg]]\n"
+        f"{marker_end_comment(marker)}"
+    )
+    payload = parse_note_render_payload(content)
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="hello\n"),
+            AttachmentChunk(attachment_rel="2026/attachments/a.jpg"),
+            TextChunk(text="\n"),
+        ]
+    )
+
+
+def test_marker_tokens_are_stable() -> None:
+    """Marker tokens should remain explicit and stable for compatibility."""
+    assert TG_ENTRY_START_TOKEN == "tg-entry-start"
+    assert TG_ENTRY_END_TOKEN == "tg-entry-end"
+
+
+def test_format_timestamp_as_prefixed_quote_with_seconds() -> None:
+    """Timestamps should be extracted and formatted with > prefix."""
+    content = "Entry at %% 09:35:05 %% today."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "Entry at >09:35:05 today."
+
+
+def test_format_timestamp_as_prefixed_quote_without_seconds() -> None:
+    """Timestamps without seconds should also be formatted with > prefix."""
+    content = "Started %% 14:30 %% in the morning."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "Started >14:30 in the morning."
+
+
+def test_format_timestamp_as_prefixed_quote_multiple() -> None:
+    """Multiple timestamps in content should all use > prefix."""
+    content = "First %% 09:00:00 %% then %% 10:30 %% and %% 15:45:30 %%."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "First >09:00:00 then >10:30 and >15:45:30."
+
+
+def test_format_timestamp_as_prefixed_quote_with_extra_spaces() -> None:
+    """Timestamps with extra spaces should still be formatted correctly."""
+    content = "Time:  %%  11:22:33  %%  here."
+    result = format_timestamp_as_prefixed_quote(content)
+    assert result == "Time:  >11:22:33  here."
+
+
+def test_parse_note_render_payload_formats_timestamps() -> None:
+    """Render payload parsing should format timestamps with > prefix."""
+    content = "Entry at %% 13:45:00 %%\ntext content"
+    payload = parse_note_render_payload(content)
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="Entry at >13:45:00\ntext content"),
+        ]
+    )
+
+
 def test_format_with_quote_empty_lines() -> None:
     """Empty lines in quotes should become standalone >."""
     result = format_with_quote("line 1\n\nline 3", "content")
@@ -322,3 +444,24 @@ def test_extract_reply_quote_missing_from_user() -> None:
         reply_to_message=replied_msg,
     )
     assert extract_reply_quote(message) is None  # type: ignore[arg-type]
+
+
+def test_extract_reply_quote_bot_reply() -> None:
+    """Reply to a bot message should include the bot's message as a quote."""
+    replied_msg = SimpleNamespace(
+        text="On this day in 2023 you wrote...",
+        text_markdown_urled="On this day in 2023 you wrote...",
+        caption=None,
+        from_user=SimpleNamespace(id=999, is_bot=True),
+        photo=None,
+        voice=None,
+        video=None,
+        video_note=None,
+        location=None,
+    )
+    message = SimpleNamespace(
+        text="my reply to the bot",
+        from_user=SimpleNamespace(id=1, is_bot=False),
+        reply_to_message=replied_msg,
+    )
+    assert extract_reply_quote(message) == "On this day in 2023 you wrote..."  # type: ignore[arg-type]

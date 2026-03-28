@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -14,6 +16,111 @@ MOOD_LABELS = {
     4: "🙂",
     5: "😊",
 }
+
+TG_ENTRY_START_TOKEN = "tg-entry-start"
+TG_ENTRY_END_TOKEN = "tg-entry-end"
+
+_EMBED_RE = re.compile(r"!\[\[(?P<target>[^\]]+)\]\]")
+_INTERNAL_TG_ENTRY_MARKER_RE = re.compile(
+    rf"(?m)^<!-- (?:{TG_ENTRY_START_TOKEN}|{TG_ENTRY_END_TOKEN}):[^>]+ -->\n?"
+)
+_TIMESTAMP_MARKER_RE = re.compile(r"%%\s*(?P<time>\d{2}:\d{2}(?::\d{2})?)\s*%%")
+
+
+@dataclass(frozen=True)
+class TextChunk:
+    """Represents a plain text section to send to Telegram."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class AttachmentChunk:
+    """Represents a file embed path extracted from note markdown."""
+
+    attachment_rel: str
+
+
+@dataclass(frozen=True)
+class NoteRenderPayload:
+    """Ordered collection of text and attachment chunks."""
+
+    chunks: list[TextChunk | AttachmentChunk]
+
+
+def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
+    """Parse note content into ordered text and attachment chunks.
+
+    Obsidian-style embeds like ``![[2026/attachments/file.jpg]]`` are extracted as
+    attachment chunks while preserving surrounding text in separate chunks.
+    """
+    sanitized_content = strip_internal_tracking_markers(note_content)
+    formatted_content = format_timestamp_as_prefixed_quote(sanitized_content)
+    chunks: list[TextChunk | AttachmentChunk] = []
+    cursor = 0
+
+    for match in _EMBED_RE.finditer(formatted_content):
+        before = formatted_content[cursor : match.start()]
+        if before:
+            chunks.append(TextChunk(text=before))
+
+        target = match.group("target").strip()
+        # Keep first path component before Obsidian alias/heading fragments.
+        attachment_rel = target.split("|", maxsplit=1)[0]
+        attachment_rel = attachment_rel.split("#", maxsplit=1)[0].strip()
+        if attachment_rel:
+            chunks.append(AttachmentChunk(attachment_rel=attachment_rel))
+
+        cursor = match.end()
+
+    tail = formatted_content[cursor:]
+    if tail:
+        chunks.append(TextChunk(text=tail))
+
+    return NoteRenderPayload(chunks=chunks)
+
+
+def strip_internal_tracking_markers(note_content: str) -> str:
+    """Remove internal Telegram entry-tracking markers from note text."""
+    return _INTERNAL_TG_ENTRY_MARKER_RE.sub("", note_content)
+
+
+def build_message_marker(chat_id: int, message_id: int) -> str:
+    """Build stable marker key for an entry generated from one message."""
+    return f"{chat_id}:{message_id}"
+
+
+def marker_start_comment(marker: str) -> str:
+    """Return marker start line for persisted entry bodies."""
+    return f"<!-- {TG_ENTRY_START_TOKEN}:{marker} -->"
+
+
+def marker_end_comment(marker: str) -> str:
+    """Return marker end line for persisted entry bodies."""
+    return f"<!-- {TG_ENTRY_END_TOKEN}:{marker} -->"
+
+
+def wrap_body_with_marker(body: str, marker: str) -> str:
+    """Wrap body payload with marker comments for future in-place updates."""
+    clean_body = body.strip()
+    return (
+        f"{marker_start_comment(marker)}\n"
+        f"{clean_body}\n"
+        f"{marker_end_comment(marker)}"
+    )
+
+
+def format_timestamp_as_prefixed_quote(content: str) -> str:
+    """Replace timestamp markers with >-prefixed time format.
+
+    Transforms ``%% HH:MM:SS %%`` to ``>HH:MM:SS`` for user display.
+    """
+
+    def _replace_with_quote_prefix(match: re.Match[str]) -> str:
+        time_str = match.group("time")
+        return f">{time_str}"
+
+    return _TIMESTAMP_MARKER_RE.sub(_replace_with_quote_prefix, content)
 
 
 def extract_mood_value(raw_mood: Any) -> int | None:
@@ -57,15 +164,17 @@ def render_message_markdown(message: Message) -> str:
 
 
 def extract_reply_quote(message: Message) -> str | None:
-    """Extract quoted text from a self-reply message, or None if not applicable."""
+    """Extract quoted text from a self-reply or bot-reply, or None if not applicable."""
     reply_to = message.reply_to_message
     if not reply_to:
         return None
 
-    # Only quote self-replies (same user)
     if not message.from_user or not reply_to.from_user:
         return None
-    if message.from_user.id != reply_to.from_user.id:
+
+    is_self_reply = message.from_user.id == reply_to.from_user.id
+    is_bot_reply = getattr(reply_to.from_user, "is_bot", False)
+    if not is_self_reply and not is_bot_reply:
         return None
 
     # Extract text or caption from the replied message

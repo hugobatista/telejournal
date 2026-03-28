@@ -5,6 +5,19 @@ applyTo: '**/*.py'
 
 # Python Coding Conventions
 
+## Project structure, frameworks and libraries
+- if implementing a CLI, use typer as the framework. Typer is a modern and easy-to-use library that allows you to create powerful CLI applications with minimal code. 
+- use pyproject.toml to specify project metadata and dependencies. This file should include information about the project, such as its name, version, and any required packages. 
+- use uv to manage dependencies and run the project. 
+- on uv make sure to exclude newer versions of dependencies for 30 days. Add this to the pyproject.toml file:
+
+```toml
+[tool.uv]
+exclude-newer = "30 days"
+```
+
+
+
 ## Python Instructions
 
 - Write clear and concise comments for each function.
@@ -15,6 +28,7 @@ applyTo: '**/*.py'
 
 ## General Instructions
 
+- even if the prompt is in another language, write code in English to ensure accessibility and maintainability.
 - Always prioritize readability and clarity.
 - For algorithm-related code, include explanations of the approach used.
 - Write code with good maintainability practices, including comments on why certain design decisions were made.

@@ -1,16 +1,27 @@
-"""Tests for environment configuration loading."""
+"""Tests for application configuration loading and validation."""
 
 from __future__ import annotations
 
+from datetime import UTC, time
 from pathlib import Path
 
 import pytest
 
 from telejournal.config import (
+    STORAGE_PROVIDER_GITHUB,
+    STORAGE_PROVIDER_OBSIDIAN,
+    _merge_configs,
     _normalize_allowed_user_ids,
     _parse_allowed_user_ids,
+    _parse_daily_brief_time_utc,
+    _parse_tag_choices,
     load_settings,
 )
+
+
+def _set_common_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
 
 
 def test_parse_allowed_user_ids_empty() -> None:
@@ -30,20 +41,10 @@ def test_parse_allowed_user_ids_values() -> None:
 def test_load_settings_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Missing token should fail fast at startup."""
     monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
-    monkeypatch.setenv("VAULT_ROOT", "/tmp/vault")
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", "/tmp/vault")
 
     with pytest.raises(ValueError, match="TELEGRAM_TOKEN"):
-        load_settings()
-
-
-def test_load_settings_requires_vault_root(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Missing vault root should fail fast at startup."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.delenv("VAULT_ROOT", raising=False)
-
-    with pytest.raises(ValueError, match="VAULT_ROOT"):
         load_settings()
 
 
@@ -52,131 +53,142 @@ def test_load_settings_requires_allowed_user_ids(
 ) -> None:
     """Missing allowed user IDs should fail fast at startup."""
     monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("VAULT_ROOT", "/tmp/vault")
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", "/tmp/vault")
     monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
 
     with pytest.raises(ValueError, match="TELEGRAM_ALLOWED_USER_IDS"):
         load_settings()
 
 
-def test_load_settings_builds_defaults(
+def test_load_settings_obsidian_provider_from_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Environment values should be normalized to runtime settings."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
+    """Obsidian provider should load from hierarchical storage env values."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_SECURE_FILE_PERMISSIONS", "false")
     monkeypatch.setenv("LOG_LEVEL", "debug")
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1, 2")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "90")
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", "09:30")
+    monkeypatch.setenv("TAG_CHOICES", "family,focus")
+    monkeypatch.setenv("PROMPT_FOR_MOOD_IF_MISSING", "false")
+    monkeypatch.setenv("BOT_MENU_ENABLED", "false")
 
     settings = load_settings()
 
-    assert settings.telegram_token == "token"
+    assert settings.storage_provider == STORAGE_PROVIDER_OBSIDIAN
     assert settings.vault_root.exists()
+    assert settings.secure_file_permissions is False
     assert settings.log_level == "DEBUG"
-    assert settings.allowed_user_ids == {1, 2}
+    assert settings.allowed_user_ids == {123}
     assert settings.message_timestamp_window_seconds == 90
+    assert settings.daily_brief_time_utc is not None
+    assert settings.daily_brief_time_utc.strftime("%H:%M:%S") == "09:30:00"
+    assert settings.tag_choices == ("family", "focus")
+    assert settings.prompt_for_mood_if_missing is False
+    assert settings.bot_menu_enabled is False
 
 
-def test_load_settings_defaults_window_seconds(
+def test_load_settings_obsidian_requires_root(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Window setting should default to 60 seconds when absent."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
-    monkeypatch.delenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", raising=False)
+    """Obsidian provider should require storage.obsidian_vault.root."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.delenv("STORAGE_OBSIDIAN_VAULT_ROOT", raising=False)
 
-    settings = load_settings()
-    assert settings.message_timestamp_window_seconds == 60
-
-
-def test_load_settings_rejects_negative_window_seconds(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Negative window values should fail fast."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
-    monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "-1")
-
-    with pytest.raises(ValueError, match="MESSAGE_TIMESTAMP_WINDOW_SECONDS"):
+    with pytest.raises(ValueError, match="obsidian_vault.root"):
         load_settings()
 
 
-def test_load_settings_secure_permissions_default_true(
+def test_load_settings_github_provider_from_env(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Secure file permissions should default to True when not specified."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
-    monkeypatch.delenv("SECURE_FILE_PERMISSIONS", raising=False)
+    """GitHub provider should parse owner/repo/token and optional values."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "github_repo")
+    monkeypatch.setenv("STORAGE_GITHUB_OWNER", "acme")
+    monkeypatch.setenv("STORAGE_GITHUB_REPO", "journal")
+    monkeypatch.setenv("STORAGE_GITHUB_TOKEN", "gh-token")
+    monkeypatch.setenv("STORAGE_GITHUB_BRANCH", "dev")
+    monkeypatch.setenv("STORAGE_GITHUB_PATH_PREFIX", "/notes/")
+    monkeypatch.setenv("STORAGE_GITHUB_API_BASE_URL", "https://api.github.com/")
+    monkeypatch.setenv("STORAGE_GITHUB_BATCH_WINDOW_SECONDS", "120")
 
     settings = load_settings()
-    assert settings.secure_file_permissions is True
+    assert settings.storage_provider == STORAGE_PROVIDER_GITHUB
+    assert settings.github_owner == "acme"
+    assert settings.github_repo == "journal"
+    assert settings.github_token == "gh-token"
+    assert settings.github_branch == "dev"
+    assert settings.github_path_prefix == "notes"
+    assert settings.github_api_base_url == "https://api.github.com/"
+    assert settings.github_batch_window_seconds == 120
 
 
-def test_load_settings_secure_permissions_explicit_values(
+def test_load_settings_github_rejects_invalid_batch_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GitHub provider should reject batch windows below one second."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "github_repo")
+    monkeypatch.setenv("STORAGE_GITHUB_OWNER", "acme")
+    monkeypatch.setenv("STORAGE_GITHUB_REPO", "journal")
+    monkeypatch.setenv("STORAGE_GITHUB_TOKEN", "gh-token")
+    monkeypatch.setenv("STORAGE_GITHUB_BATCH_WINDOW_SECONDS", "0")
+
+    with pytest.raises(ValueError, match="batch_window_seconds"):
+        load_settings()
+
+
+@pytest.mark.parametrize(
+    "key, value, match",
+    [
+        ("STORAGE_GITHUB_OWNER", "", "github_repo.owner"),
+        ("STORAGE_GITHUB_REPO", "", "github_repo.repo"),
+        ("STORAGE_GITHUB_TOKEN", "", "github_repo.token"),
+    ],
+)
+def test_load_settings_github_requires_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    value: str,
+    match: str,
+) -> None:
+    """GitHub provider should reject missing required settings."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "github_repo")
+    monkeypatch.setenv("STORAGE_GITHUB_OWNER", "acme")
+    monkeypatch.setenv("STORAGE_GITHUB_REPO", "journal")
+    monkeypatch.setenv("STORAGE_GITHUB_TOKEN", "gh-token")
+    monkeypatch.setenv(key, value)
+
+    with pytest.raises(ValueError, match=match):
+        load_settings()
+
+
+def test_load_settings_rejects_invalid_storage_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported storage providers should fail fast with clear message."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "unknown")
+
+    with pytest.raises(ValueError, match="storage.provider"):
+        load_settings()
+
+
+def test_load_settings_defaults_and_yaml_cli_priority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Secure file permissions should parse various true/false values."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "vault"))
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123")
-
-    # Test true values
-    for true_value in ["true", "TRUE", "True", "1", "yes", "YES", "on", "ON"]:
-        monkeypatch.setenv("SECURE_FILE_PERMISSIONS", true_value)
-        settings = load_settings()
-        assert settings.secure_file_permissions is True, f"Failed for: {true_value}"
-
-    # Test false values
-    for false_value in ["false", "FALSE", "False", "0", "no", "NO", "off", "OFF"]:
-        monkeypatch.setenv("SECURE_FILE_PERMISSIONS", false_value)
-        settings = load_settings()
-        assert settings.secure_file_permissions is False, f"Failed for: {false_value}"
-
-
-def test_load_settings_yaml_values(tmp_path: Path) -> None:
-    """YAML configuration should be loaded when file path is provided."""
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(
-        "\n".join(
-            [
-                "telegram_token: yaml-token",
-                f"vault_root: {tmp_path / 'vault'}",
-                'allowed_user_ids: "10,20"',
-                "log_level: warning",
-                "message_timestamp_window_seconds: 30",
-                "secure_file_permissions: false",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    settings = load_settings(config_path=yaml_path)
-
-    assert settings.telegram_token == "yaml-token"
-    assert settings.allowed_user_ids == {10, 20}
-    assert settings.log_level == "WARNING"
-    assert settings.message_timestamp_window_seconds == 30
-    assert settings.secure_file_permissions is False
-
-
-def test_load_settings_priority_cli_over_yaml_over_env(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """CLI should override YAML, and YAML should override environment values."""
-    monkeypatch.setenv("TELEGRAM_TOKEN", "env-token")
-    monkeypatch.setenv("VAULT_ROOT", str(tmp_path / "env-vault"))
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "1,2")
+    """CLI should override YAML, and YAML should override env values."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", str(tmp_path / "env-vault"))
     monkeypatch.setenv("LOG_LEVEL", "error")
     monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "10")
 
@@ -185,8 +197,12 @@ def test_load_settings_priority_cli_over_yaml_over_env(
         "\n".join(
             [
                 "telegram_token: yaml-token",
-                f"vault_root: {tmp_path / 'yaml-vault'}",
-                'allowed_user_ids: "3,4"',
+                "allowed_user_ids: [3, 4]",
+                "storage:",
+                "  provider: obsidian_vault",
+                "  obsidian_vault:",
+                f"    root: {tmp_path / 'yaml-vault'}",
+                "    secure_file_permissions: true",
                 "log_level: warning",
                 "message_timestamp_window_seconds: 20",
             ]
@@ -208,47 +224,67 @@ def test_load_settings_priority_cli_over_yaml_over_env(
     assert settings.allowed_user_ids == {3, 4}
     assert settings.log_level == "DEBUG"
     assert settings.message_timestamp_window_seconds == 99
+    assert settings.daily_brief_time_utc == time(9, 0, tzinfo=UTC)
 
 
-def test_load_settings_cli_env_expansion(
+def test_load_settings_cli_and_yaml_env_expansion(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """CLI values should support ${VAR} environment expansion."""
+    """Both YAML and CLI values should support environment expansion."""
     monkeypatch.setenv("MY_TOKEN", "expanded-token")
-
-    settings = load_settings(
-        cli_overrides={
-            "telegram_token": "${MY_TOKEN}",
-            "vault_root": str(tmp_path / "vault"),
-            "allowed_user_ids": "123",
-        }
-    )
-
-    assert settings.telegram_token == "expanded-token"
-
-
-def test_load_settings_yaml_env_expansion(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """YAML values should support ${VAR} environment expansion."""
-    monkeypatch.setenv("YAML_TOKEN", "yaml-expanded")
+    monkeypatch.setenv("MY_ROOT", str(tmp_path / "vault"))
 
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(
         "\n".join(
             [
-                "telegram_token: ${YAML_TOKEN}",
-                f"vault_root: {tmp_path / 'vault'}",
-                'allowed_user_ids: "11,12"',
+                "telegram_token: ${MY_TOKEN}",
+                "allowed_user_ids: '11,12'",
+                "storage:",
+                "  provider: obsidian_vault",
+                "  obsidian_vault:",
+                "    root: ${MY_ROOT}",
             ]
         ),
         encoding="utf-8",
     )
 
-    settings = load_settings(config_path=yaml_path)
-    assert settings.telegram_token == "yaml-expanded"
+    settings = load_settings(
+        config_path=yaml_path,
+        cli_overrides={"telegram_token": "${MY_TOKEN}"},
+    )
+    assert settings.telegram_token == "expanded-token"
+
+
+@pytest.mark.parametrize("value", ["25:00", "9:30", "abc", "24:00:00"])
+def test_load_settings_rejects_invalid_daily_brief_time(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    value: str,
+) -> None:
+    """Invalid daily brief values should fail fast with a clear error."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("DAILY_BRIEF_TIME_UTC", value)
+
+    with pytest.raises(ValueError, match="DAILY_BRIEF_TIME_UTC"):
+        load_settings()
+
+
+def test_load_settings_rejects_negative_window_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Negative window values should fail fast."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "obsidian_vault")
+    monkeypatch.setenv("STORAGE_OBSIDIAN_VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.setenv("MESSAGE_TIMESTAMP_WINDOW_SECONDS", "-1")
+
+    with pytest.raises(ValueError, match="MESSAGE_TIMESTAMP_WINDOW_SECONDS"):
+        load_settings()
 
 
 def test_load_settings_yaml_missing_file(tmp_path: Path) -> None:
@@ -274,3 +310,52 @@ def test_normalize_allowed_user_ids_empty_sequence() -> None:
     """Empty list-like values should be rejected."""
     with pytest.raises(ValueError, match="at least one valid user ID"):
         _normalize_allowed_user_ids([])
+
+
+def test_parse_tag_choices_valid_values() -> None:
+    """Tag parser should normalize, deduplicate, and preserve order."""
+    assert _parse_tag_choices("family, focus, FAMILY") == ("family", "focus")
+    assert _parse_tag_choices(["health", "Health", "hobby"]) == (
+        "health",
+        "hobby",
+    )
+
+
+@pytest.mark.parametrize("value", ["", "!!!", "bad tag", ["x", "bad tag"], 123])
+def test_parse_tag_choices_rejects_invalid_values(value: object) -> None:
+    """Invalid tag choices should fail with a clear validation error."""
+    with pytest.raises(ValueError, match="TAG_CHOICES"):
+        _parse_tag_choices(value)
+
+
+def test_parse_daily_brief_time_none_and_numeric_zero() -> None:
+    """Daily brief parser should support disabled values from varied sources."""
+    assert _parse_daily_brief_time_utc(None) is None
+    assert _parse_daily_brief_time_utc(0) is None
+
+
+def test_merge_configs_ignores_none_and_merges_nested() -> None:
+    """Nested mappings should merge while None values keep existing data."""
+    merged = _merge_configs(
+        {
+            "storage": {
+                "provider": "obsidian_vault",
+                "obsidian_vault": {
+                    "root": "/a",
+                    "secure_file_permissions": True,
+                },
+            }
+        },
+        {
+            "storage": {
+                "obsidian_vault": {
+                    "root": None,
+                    "secure_file_permissions": False,
+                }
+            }
+        },
+    )
+
+    assert merged["storage"]["provider"] == "obsidian_vault"
+    assert merged["storage"]["obsidian_vault"]["root"] == "/a"
+    assert merged["storage"]["obsidian_vault"]["secure_file_permissions"] is False

@@ -14,6 +14,11 @@ _LOGGER_NAME = "telejournal"
 _SYSLOG_SOCKET_PATH = Path("/dev/log")
 
 
+def _warn_stderr(message: str) -> None:
+    """Emit a warning message to stderr without touching logger handlers."""
+    print(message, file=sys.stderr)
+
+
 def _add_console_handler(logger: logging.Logger) -> None:
     """Add a stdout console handler using the standard format."""
     console_handler = logging.StreamHandler(sys.stdout)
@@ -35,12 +40,9 @@ def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> bool:
     """Add syslog handler when available on the host platform."""
     if not _is_syslog_socket_available():
         if not silent:
-            print(
-                (
-                    "Warning: Syslog socket /dev/log is unavailable; "
-                    "continuing without syslog logging."
-                ),
-                file=sys.stderr,
+            _warn_stderr(
+                "Warning: Syslog socket /dev/log is unavailable; "
+                "continuing without syslog logging."
             )
         return False
 
@@ -54,12 +56,9 @@ def _add_syslog_handler(logger: logging.Logger, silent: bool = True) -> bool:
         return True
     except Exception as exc:  # pragma: no cover - platform-specific
         if not silent:
-            print(
-                (
-                    "Warning: Could not set up syslog logging: "
-                    f"{exc}. This may be expected on this platform."
-                ),
-                file=sys.stderr,
+            _warn_stderr(
+                "Warning: Could not set up syslog logging: "
+                f"{exc}. This may be expected on this platform."
             )
         return False
 
