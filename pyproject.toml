@@ -1,6 +1,6 @@
 [project]
 name = "telejournal"
-version = "0.0.3"
+version = "0.1.0"
 description = "Telegram bot that journals private messages into an Obsidian vault"
 readme = "README.md"
 requires-python = ">=3.11"
