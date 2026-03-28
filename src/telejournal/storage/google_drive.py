@@ -100,9 +100,7 @@ class GoogleDriveRepository:  # pragma: no cover
             self._ensure_device_code_payload()
         except RuntimeError:
             # Keep bot startup resilient; operators can recover via /storageauth.
-            LOGGER.warning(
-                "Google Drive device-code bootstrap failed during startup"
-            )
+            LOGGER.warning("Google Drive device-code bootstrap failed during startup")
 
     def _parse_expiry(self) -> datetime | None:
         """Parse the cached expiry timestamp in strict UTC format."""
@@ -486,6 +484,14 @@ class GoogleDriveRepository:  # pragma: no cover
                 break
             except urllib_error.HTTPError as exc:
                 if allow_not_found and exc.code == 404:
+                    LOGGER.debug(
+                        (
+                            "Google Drive optional lookup returned 404 "
+                            "(method=%s endpoint=%s)"
+                        ),
+                        method,
+                        endpoint,
+                    )
                     return None
                 if exc.code == 401:
                     if attempt == 0 and self._try_refresh_after_unauthorized():
@@ -529,6 +535,14 @@ class GoogleDriveRepository:  # pragma: no cover
                     return bytes(response.read())
             except urllib_error.HTTPError as exc:
                 if allow_not_found and exc.code == 404:
+                    LOGGER.debug(
+                        (
+                            "Google Drive optional lookup returned 404 "
+                            "(method=%s endpoint=%s)"
+                        ),
+                        method,
+                        endpoint,
+                    )
                     return None
                 if exc.code == 401:
                     if attempt == 0 and self._try_refresh_after_unauthorized():

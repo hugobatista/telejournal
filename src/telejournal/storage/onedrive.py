@@ -645,14 +645,22 @@ class OneDriveRepository:  # pragma: no cover
                 break
             except urllib_error.HTTPError as exc:
                 error_body = self._read_http_error_body(exc)
+                if allow_not_found and exc.code == 404:
+                    LOGGER.debug(
+                        (
+                            "OneDrive optional lookup returned 404 "
+                            "(method=%s endpoint=%s)"
+                        ),
+                        method,
+                        endpoint,
+                    )
+                    return None
                 self._log_graph_http_error(
                     method=method,
                     endpoint=endpoint,
                     exc=exc,
                     body=error_body,
                 )
-                if allow_not_found and exc.code == 404:
-                    return None
                 if exc.code == 401:
                     if attempt == 0 and self._try_refresh_after_unauthorized():
                         continue
@@ -700,14 +708,22 @@ class OneDriveRepository:  # pragma: no cover
                     return bytes(response.read())
             except urllib_error.HTTPError as exc:
                 error_body = self._read_http_error_body(exc)
+                if allow_not_found and exc.code == 404:
+                    LOGGER.debug(
+                        (
+                            "OneDrive optional lookup returned 404 "
+                            "(method=%s endpoint=%s)"
+                        ),
+                        method,
+                        endpoint,
+                    )
+                    return None
                 self._log_graph_http_error(
                     method=method,
                     endpoint=endpoint,
                     exc=exc,
                     body=error_body,
                 )
-                if allow_not_found and exc.code == 404:
-                    return None
                 if exc.code == 401:
                     if attempt == 0 and self._try_refresh_after_unauthorized():
                         continue

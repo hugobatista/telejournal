@@ -19,6 +19,7 @@ from telejournal.formatting import marker_end_comment, marker_start_comment
 from telejournal.config import Settings
 from telejournal.storage import (
     GitHubRepository,
+    GoogleDriveRepository,
     NoteData,
     OneDriveAuthorizationRequiredError,
     OneDriveRepository,
@@ -1694,9 +1695,17 @@ def test_onedrive_request_helpers_and_path_helpers(
         "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_404),
     )
+    http_logs: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        repo,
+        "_log_graph_http_error",
+        lambda **kwargs: http_logs.append(kwargs),
+    )
     assert repo._request_json("GET", "/x", allow_not_found=True) is None
+    assert http_logs == []
     with pytest.raises(RuntimeError, match="OneDrive API request failed"):
         repo._request_json("GET", "/x")
+    assert len(http_logs) == 1
 
     monkeypatch.setattr(
         "telejournal.storage.onedrive.urllib_request.urlopen",
@@ -1725,7 +1734,9 @@ def test_onedrive_request_helpers_and_path_helpers(
         "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_404),
     )
+    http_logs.clear()
     assert repo._request_bytes("GET", "/x", allow_not_found=True) is None
+    assert http_logs == []
 
     http_401 = urllib_error.HTTPError(
         url="http://x",
@@ -1785,6 +1796,50 @@ def test_onedrive_request_helpers_and_path_helpers(
     assert repo._path_endpoint("a/b", content=True) == "/me/drive/root:/a/b:/content"
     assert repo._children_endpoint("") == "/me/drive/root/children"
     assert repo._children_endpoint("a/b") == "/me/drive/root:/a/b:/children"
-    assert (
-        repo._repo_path("2026/2026-03-07.md") == "Apps/telejournal/2026/2026-03-07.md"
+
+
+def test_google_drive_optional_404_paths_log_only_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Google Drive allow_not_found probes should not escalate to warnings."""
+    monkeypatch.setattr(
+        GoogleDriveRepository, "_initialize_auth_state", lambda _s: None
     )
+    repo = GoogleDriveRepository(
+        client_id="client-id",
+        client_secret="client-secret",
+        folder_id="folder-id",
+    )
+    monkeypatch.setattr(
+        repo,
+        "_build_headers",
+        lambda **_k: {"Authorization": "x"},
+    )
+
+    debug_logs: list[str] = []
+    warning_logs: list[str] = []
+    monkeypatch.setattr(
+        "telejournal.storage.google_drive.LOGGER.debug",
+        lambda message, *args: debug_logs.append(message % args),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.google_drive.LOGGER.warning",
+        lambda message, *args: warning_logs.append(message % args),
+    )
+
+    http_404 = urllib_error.HTTPError(
+        url="http://x",
+        code=404,
+        msg="not found",
+        hdrs=None,
+        fp=None,
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.google_drive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_404),
+    )
+
+    assert repo._request_json("GET", "/x", allow_not_found=True) is None
+    assert repo._request_bytes("GET", "/x", allow_not_found=True) is None
+    assert len(debug_logs) == 2
+    assert warning_logs == []
