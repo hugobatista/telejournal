@@ -52,7 +52,7 @@ async def test_append_entry_creates_note_with_today_defaults(tmp_path: Path) -> 
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
     # Mock datetime.now to return a datetime on the same date as note_dt
-    with patch("telejournal.storage.datetime") as mock_dt:
+    with patch("telejournal.storage.obsidian.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 3, 7, 12, 0, 0, tzinfo=UTC)
         mock_dt.combine = datetime.combine
         mock_dt.min.time = datetime.min.time
@@ -677,7 +677,7 @@ def test_github_repository_warns_on_public_repo(
 
     monkeypatch.setattr(GitHubRepository, "_request_json", _fake_request)
     monkeypatch.setattr(
-        "telejournal.storage.LOGGER.warning",
+        "telejournal.storage.github.LOGGER.warning",
         lambda message, *args: warnings.append(message % args),
     )
     GitHubRepository("acme", "journal", "token")
@@ -703,7 +703,7 @@ def test_github_repository_warns_when_visibility_check_fails(
 
     monkeypatch.setattr(GitHubRepository, "_request_json", _raise_request)
     monkeypatch.setattr(
-        "telejournal.storage.LOGGER.warning",
+        "telejournal.storage.github.LOGGER.warning",
         lambda message, *args: warnings.append(message % args),
     )
     GitHubRepository("acme", "journal", "token")
@@ -728,7 +728,7 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             return b'{"ok": true}'
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen", lambda *_a, **_k: _Resp()
+        "telejournal.storage.github.urllib_request.urlopen", lambda *_a, **_k: _Resp()
     )
     payload = repo._request_json("GET", "/x")
     assert payload == {"ok": True}
@@ -741,7 +741,7 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=None,
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_404),
     )
     assert repo._request_json("GET", "/x", allow_not_found=True) is None
@@ -754,14 +754,14 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=None,
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_500),
     )
     with pytest.raises(RuntimeError, match="GitHub API request failed"):
         repo._request_json("GET", "/x")
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(OSError("down")),
     )
     with pytest.raises(RuntimeError, match="GitHub API request failed"):
@@ -987,12 +987,12 @@ async def test_github_repository_remaining_branches(
             return b""
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: _EmptyResp(),
     )
     assert repo._request_json("PUT", "/x", payload={"a": 1}) is None
 
-    with patch("telejournal.storage.datetime") as mock_dt:
+    with patch("telejournal.storage.github.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 3, 7, 12, 0, 0, tzinfo=UTC)
         mock_dt.combine = datetime.combine
         mock_dt.min.time = datetime.min.time
@@ -1241,7 +1241,7 @@ async def test_github_repository_flush_loop_starts_once_and_handles_cancel(
         started.append(task)  # type: ignore[arg-type]
         return task  # type: ignore[return-value]
 
-    monkeypatch.setattr("telejournal.storage.asyncio.create_task", _create_task)
+    monkeypatch.setattr("telejournal.storage.github.asyncio.create_task", _create_task)
     repo._ensure_flush_task()
     repo._ensure_flush_task()
     assert len(started) == 1
@@ -1256,7 +1256,7 @@ async def test_github_repository_flush_loop_starts_once_and_handles_cancel(
         return None
 
     monkeypatch.setattr(repo, "flush_pending", _flush_pending)
-    monkeypatch.setattr("telejournal.storage.asyncio.sleep", _sleep)
+    monkeypatch.setattr("telejournal.storage.github.asyncio.sleep", _sleep)
 
     with pytest.raises(asyncio.CancelledError):
         await repo._flush_loop()
@@ -1300,7 +1300,7 @@ async def test_github_repository_queue_edge_branches(
         return None
 
     monkeypatch.setattr(repo, "flush_pending", _flush_pending)
-    monkeypatch.setattr("telejournal.storage.asyncio.sleep", _sleep)
+    monkeypatch.setattr("telejournal.storage.github.asyncio.sleep", _sleep)
     with pytest.raises(asyncio.CancelledError):
         await repo._flush_loop()
 
@@ -1489,7 +1489,7 @@ def test_onedrive_request_form_token_http_error_parsing(
         fp=io.BytesIO(b'{"error":"authorization_pending"}'),
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_json_error),
     )
     payload = repo._request_form_token({"x": "y"})
@@ -1503,7 +1503,7 @@ def test_onedrive_request_form_token_http_error_parsing(
         fp=io.BytesIO(b"server error"),
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_non_json),
     )
     with pytest.raises(RuntimeError, match="token request failed"):
@@ -1662,7 +1662,7 @@ def test_onedrive_request_helpers_and_path_helpers(
             return b'{"ok": true}'
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: _JsonResp(),
     )
     assert repo._request_json("GET", "/x") == {"ok": True}
@@ -1678,7 +1678,7 @@ def test_onedrive_request_helpers_and_path_helpers(
             return b""
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: _EmptyResp(),
     )
     assert repo._request_json("GET", "/x") is None
@@ -1691,7 +1691,7 @@ def test_onedrive_request_helpers_and_path_helpers(
         fp=None,
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_404),
     )
     assert repo._request_json("GET", "/x", allow_not_found=True) is None
@@ -1699,7 +1699,7 @@ def test_onedrive_request_helpers_and_path_helpers(
         repo._request_json("GET", "/x")
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(OSError("down")),
     )
     with pytest.raises(RuntimeError, match="OneDrive API request failed"):
@@ -1716,13 +1716,13 @@ def test_onedrive_request_helpers_and_path_helpers(
             return b"raw"
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: _BytesResp(),
     )
     assert repo._request_bytes("GET", "/x") == b"raw"
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_404),
     )
     assert repo._request_bytes("GET", "/x", allow_not_found=True) is None
@@ -1745,7 +1745,7 @@ def test_onedrive_request_helpers_and_path_helpers(
         lambda: OneDriveAuthorizationRequiredError("auth required"),
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.onedrive.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_401),
     )
     with pytest.raises(OneDriveAuthorizationRequiredError):
@@ -1765,7 +1765,7 @@ def test_onedrive_request_helpers_and_path_helpers(
 
     graph_log_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.build_opener",
+        "telejournal.storage.onedrive.urllib_request.build_opener",
         lambda *_a, **_k: _RedirectOpener(),
     )
     monkeypatch.setattr(repo, "_request_download_bytes", lambda _u: b"redirected")

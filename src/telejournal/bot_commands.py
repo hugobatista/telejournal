@@ -317,13 +317,6 @@ class CommandHandlerService:
         if not update.effective_message:
             return
 
-        settings = self._settings()
-        if settings.storage_provider != "onedrive":
-            await update.effective_message.reply_text(
-                "This command is only available when storage.provider is onedrive."
-            )
-            return
-
         repository = self._repository()
         start_auth = getattr(repository, "start_device_authorization", None)
         complete_auth = getattr(repository, "complete_device_authorization", None)
@@ -334,7 +327,7 @@ class CommandHandlerService:
 
         if not callable(show_instructions):
             await update.effective_message.reply_text(
-                "OneDrive auth workflow is unavailable for this storage backend."
+                "Authorization workflow is unavailable for this storage backend."
             )
             return
 
@@ -360,7 +353,7 @@ class CommandHandlerService:
             if action in {"auto", ""}:
                 if callable(is_authorized) and bool(is_authorized()):
                     await update.effective_message.reply_text(
-                        "OneDrive is already authorized."
+                        "Storage backend is already authorized."
                     )
                     return
 
@@ -379,14 +372,14 @@ class CommandHandlerService:
 
             if callable(is_authorized) and bool(is_authorized()):
                 await update.effective_message.reply_text(
-                    "OneDrive is already authorized."
+                    "Storage backend is already authorized."
                 )
                 return
 
             instructions = show_instructions()
             if instructions is None:
                 await update.effective_message.reply_text(
-                    "OneDrive is already authorized."
+                    "Storage backend is already authorized."
                 )
                 return
             await update.effective_message.reply_text(instructions)
