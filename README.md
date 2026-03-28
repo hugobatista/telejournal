@@ -129,6 +129,10 @@ telejournal run \
   --allowed-user-ids 123456,987654
 ```
 
+Detailed setup guide (repository + token):
+
+- [GitHub storage configuration](docs/github-storage.md)
+
 When using `github_repo`, note writes and media uploads are queued in-memory and
 flushed in burst commits every `batch_window_seconds` (default: `60`). Bot
 feedback remains immediate, while GitHub API traffic is reduced.
@@ -149,6 +153,10 @@ telejournal run \
   --onedrive-batch-window-seconds 60 \
   --allowed-user-ids 123456,987654
 ```
+
+Detailed setup guide (app registration + credentials):
+
+- [OneDrive storage configuration](docs/onedrive-storage.md)
 
 When using `onedrive`, writes and media uploads are queued in-memory and
 flushed in bursts every `batch_window_seconds` (default: `60`).
@@ -176,6 +184,10 @@ telejournal run \
   --google-drive-batch-window-seconds 60 \
   --allowed-user-ids 123456,987654
 ```
+
+Detailed setup guide (app registration + credentials):
+
+- [Google Drive storage configuration](docs/google-drive-storage.md)
 
 When using `google_drive`, writes and media uploads are queued in-memory and
 flushed in bursts every `batch_window_seconds` (default: `60`).
