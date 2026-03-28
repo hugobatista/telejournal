@@ -180,7 +180,7 @@ After the bot is running, these commands are available in your private chat:
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
 - `/settings` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, `prompt_for_mood_if_missing`, and `bot_menu_enabled`
-- `/onedriveauth [start|complete|status]` OneDrive device authorization workflow
+- `/onedriveauth [start|complete|status]` OneDrive device authorization workflow (only when `storage.provider` is `onedrive`)
   - Changes are persisted immediately.
   - If the bot started from a YAML config file, that file is backed up and updated.
   - If no YAML config was used, `./config.yaml` is created/updated.

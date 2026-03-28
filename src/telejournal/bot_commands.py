@@ -18,6 +18,7 @@ from telejournal.bot_helpers import (
     _tags_keyboard,
     _truncate_message,
 )
+from telejournal.command_registry import visible_help_lines
 from telejournal.logic import effective_note_datetime, parse_setdate_args
 
 
@@ -66,6 +67,8 @@ class CommandHandlerService:
         if not self._is_private_and_authorized(update):
             return
 
+        command_lines = visible_help_lines(self._settings().storage_provider)
+
         help_text = (
             "📝 Telejournal Bot Usage\n\n"
             "• Every private message is journaled\n"
@@ -74,20 +77,8 @@ class CommandHandlerService:
             "• Video messages (including circular video notes) are embedded from attachments/\n"
             "• Messages within the configured time window share one timestamp\n"
             "• Mood tracked via /mood (😢 😐 😌 🙂 😊)\n\n"
-            "Commands:\n"
-            "/setdate YYYY-MM-DD [HH:MM:SS]  Set target note date/time\n"
-            "/resetdate  Return to today\n"
-            "/tags  Show tag buttons\n"
-            "/tags work kids  Add/select one or more tags\n"
-            "/mood  Open mood picker\n"
-            "/show  Show current effective day note\n"
-            "/show YYYY-MM-DD  Show a specific day note\n"
-            "/todayinhistory  Show same-day notes from previous years\n"
-            "/delete  Delete last entry and show deleted content\n"
-            "/delete day [YYYY-MM-DD]  Delete full day note\n"
-            "/settings  Guided runtime configuration\n"
-            "/onedriveauth [start|complete|status]  OneDrive device auth workflow\n"
-            "/help"
+            + "Commands:\n"
+            + "\n".join(command_lines)
         )
 
         if update.effective_message:

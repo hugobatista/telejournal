@@ -36,7 +36,7 @@ from telejournal.bot import (
     _chunk_text,
     _truncate_message,
 )
-from telejournal.config import Settings
+from telejournal.config import Settings, STORAGE_PROVIDER_ONEDRIVE
 from telejournal.storage import OneDriveAuthorizationRequiredError
 from telejournal.formatting import (
     TG_ENTRY_END_TOKEN,
@@ -253,6 +253,32 @@ async def test_help_mood_setdate_resetdate_commands(journal_bot: JournalBot) -> 
     await journal_bot.onedriveauth_command(update, context)  # type: ignore
 
     assert update.effective_message.reply_text.await_count == 7
+
+
+@pytest.mark.asyncio
+async def test_help_command_hides_provider_specific_commands(
+    journal_bot: JournalBot,
+) -> None:
+    """Help output should include onedrive auth only for onedrive provider."""
+    obsidian_update = _private_update()
+
+    await journal_bot.help_command(obsidian_update, _context())
+
+    obsidian_help = obsidian_update.effective_message.reply_text.await_args.args[0]
+    assert "/onedriveauth" not in obsidian_help
+
+    onedrive_update = _private_update()
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider=STORAGE_PROVIDER_ONEDRIVE,
+    )
+
+    await journal_bot.help_command(onedrive_update, _context())
+
+    onedrive_help = onedrive_update.effective_message.reply_text.await_args.args[0]
+    assert "/onedriveauth" in onedrive_help
 
 
 @pytest.mark.asyncio
@@ -884,6 +910,23 @@ def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
     journal_bot.register_handlers(app)  # type: ignore[arg-type]
     assert handlers
     assert errors
+    default_command_names = {
+        command for handler in handlers for command in getattr(handler, "commands", [])
+    }
+    assert "onedriveauth" not in default_command_names
+
+    handlers.clear()
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider=STORAGE_PROVIDER_ONEDRIVE,
+    )
+    journal_bot.register_handlers(app)  # type: ignore[arg-type]
+    onedrive_command_names = {
+        command for handler in handlers for command in getattr(handler, "commands", [])
+    }
+    assert "onedriveauth" in onedrive_command_names
 
     jq = _FakeJobQueue()
     journal_bot.register_jobs(jq)  # type: ignore[arg-type]

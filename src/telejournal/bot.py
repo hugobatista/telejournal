@@ -24,6 +24,7 @@ from telegram.ext import (
 from telejournal.bot_callbacks import CallbackRouterService
 from telejournal.bot_commands import CommandHandlerService
 from telejournal.bot_delivery import NoteDeliveryService
+from telejournal.command_registry import visible_command_specs
 from telejournal import bot_helpers as _bot_helpers
 from telejournal.config import Settings
 from telejournal.formatting import (
@@ -1266,7 +1267,11 @@ class JournalBot:
             & filters.ChatType.PRIVATE
         )
 
-        application.add_handler(CommandHandler("setdate", self.setdate_command))
+        storage_provider = self._settings.storage_provider
+        command_specs = visible_command_specs(storage_provider)
+        for spec in command_specs:
+            callback = getattr(self, spec.callback_name)
+            application.add_handler(CommandHandler(spec.command, callback))
 
         application.add_handler(MessageHandler(text_filter, self.handle_journal_entry))
         application.add_handler(MessageHandler(photo_filter, self.handle_journal_entry))
@@ -1281,20 +1286,6 @@ class JournalBot:
         application.add_handler(
             MessageHandler(edited_text_filter, self.handle_journal_entry)
         )
-
-        application.add_handler(CommandHandler("resetdate", self.resetdate_command))
-        application.add_handler(CommandHandler("tags", self.tags_command))
-        application.add_handler(CommandHandler("mood", self.mood_command))
-        application.add_handler(CommandHandler("delete", self.delete_command))
-        application.add_handler(CommandHandler("show", self.show_command))
-        application.add_handler(CommandHandler("settings", self.settings_command))
-        application.add_handler(
-            CommandHandler("onedriveauth", self.onedriveauth_command)
-        )
-        application.add_handler(
-            CommandHandler("todayinhistory", self.todayinhistory_command)
-        )
-        application.add_handler(CommandHandler("help", self.help_command))
 
         application.add_handler(CallbackQueryHandler(self.callback_router))
         application.add_error_handler(self.handle_error)
