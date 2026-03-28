@@ -350,7 +350,10 @@ This allows you to keep sensitive values in environment variables while using a 
 ## Test
 
 ```bash
-uv run pytest
+hatch run test
+
+# Run lint only
+hatch run lint
 
 # With full coverage and type checking
 bash validate.sh
