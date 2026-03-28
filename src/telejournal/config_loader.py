@@ -101,6 +101,23 @@ def load_env_config() -> dict[str, Any]:
     onedrive_token_expires_at_utc = os.getenv(
         "STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC", ""
     ).strip()
+    google_drive_client_id = os.getenv("STORAGE_GOOGLE_DRIVE_CLIENT_ID", "").strip()
+    google_drive_client_secret = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_CLIENT_SECRET", ""
+    ).strip()
+    google_drive_folder_id = os.getenv("STORAGE_GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    google_drive_batch_window_seconds = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_BATCH_WINDOW_SECONDS", ""
+    ).strip()
+    google_drive_access_token = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_ACCESS_TOKEN", ""
+    ).strip()
+    google_drive_refresh_token = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_REFRESH_TOKEN", ""
+    ).strip()
+    google_drive_token_expires_at_utc = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_TOKEN_EXPIRES_AT_UTC", ""
+    ).strip()
 
     has_storage = any(
         (
@@ -123,6 +140,13 @@ def load_env_config() -> dict[str, Any]:
             onedrive_access_token,
             onedrive_refresh_token,
             onedrive_token_expires_at_utc,
+            google_drive_client_id,
+            google_drive_client_secret,
+            google_drive_folder_id,
+            google_drive_batch_window_seconds,
+            google_drive_access_token,
+            google_drive_refresh_token,
+            google_drive_token_expires_at_utc,
         )
     )
     if has_storage:
@@ -151,6 +175,15 @@ def load_env_config() -> dict[str, Any]:
                 "access_token": onedrive_access_token or None,
                 "refresh_token": onedrive_refresh_token or None,
                 "token_expires_at_utc": onedrive_token_expires_at_utc or None,
+            },
+            "google_drive": {
+                "client_id": google_drive_client_id or None,
+                "client_secret": google_drive_client_secret or None,
+                "folder_id": google_drive_folder_id or None,
+                "batch_window_seconds": google_drive_batch_window_seconds or None,
+                "access_token": google_drive_access_token or None,
+                "refresh_token": google_drive_refresh_token or None,
+                "token_expires_at_utc": google_drive_token_expires_at_utc or None,
             },
         }
         config["storage"] = storage

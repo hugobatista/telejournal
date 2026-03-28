@@ -49,6 +49,19 @@ class OneDriveConfig:
 
 
 @dataclass(frozen=True)
+class GoogleDriveConfig:
+    """Settings for Google Drive storage."""
+
+    client_id: str | None = None
+    client_secret: str | None = None
+    folder_id: str | None = None
+    batch_window_seconds: int = 60
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_expires_at_utc: str | None = None
+
+
+@dataclass(frozen=True)
 class StorageSettings:
     """Normalized storage provider configuration."""
 
@@ -56,6 +69,7 @@ class StorageSettings:
     obsidian_vault: ObsidianVaultConfig | None = None
     github_repo: GitHubRepoConfig | None = None
     onedrive: OneDriveConfig | None = None
+    google_drive: GoogleDriveConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -90,4 +104,11 @@ class Settings:
     onedrive_access_token: str | None = None
     onedrive_refresh_token: str | None = None
     onedrive_token_expires_at_utc: str | None = None
+    google_drive_client_id: str | None = None
+    google_drive_client_secret: str | None = None
+    google_drive_folder_id: str | None = None
+    google_drive_batch_window_seconds: int = 60
+    google_drive_access_token: str | None = None
+    google_drive_refresh_token: str | None = None
+    google_drive_token_expires_at_utc: str | None = None
     storage: StorageSettings | None = field(default=None)

@@ -42,9 +42,13 @@ def storage_node(merged: dict[str, Any]) -> dict[str, Any]:
     raw_onedrive = storage.get("onedrive")
     onedrive = raw_onedrive if isinstance(raw_onedrive, dict) else {}
 
+    raw_google_drive = storage.get("google_drive")
+    google_drive = raw_google_drive if isinstance(raw_google_drive, dict) else {}
+
     return {
         "provider": storage.get("provider"),
         "obsidian_vault": obsidian,
         "github_repo": github,
         "onedrive": onedrive,
+        "google_drive": google_drive,
     }

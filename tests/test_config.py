@@ -9,6 +9,7 @@ import pytest
 
 from telejournal.config import (
     STORAGE_PROVIDER_GITHUB,
+    STORAGE_PROVIDER_GOOGLEDRIVE,
     STORAGE_PROVIDER_OBSIDIAN,
     STORAGE_PROVIDER_ONEDRIVE,
     _merge_configs,
@@ -316,6 +317,55 @@ def test_load_settings_onedrive_requires_client_secret(
 
     with pytest.raises(ValueError, match="storage.onedrive.client_secret"):
         load_settings()
+
+
+def test_load_settings_google_drive_provider_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Google Drive provider should parse required and optional values."""
+    _set_common_required_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_PROVIDER", "google_drive")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_FOLDER_ID", "folder-id")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_BATCH_WINDOW_SECONDS", "75")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_ACCESS_TOKEN", "access")
+    monkeypatch.setenv("STORAGE_GOOGLE_DRIVE_REFRESH_TOKEN", "refresh")
+    monkeypatch.setenv(
+        "STORAGE_GOOGLE_DRIVE_TOKEN_EXPIRES_AT_UTC",
+        "2026-03-28T10:00:00Z",
+    )
+
+    settings = load_settings()
+    assert settings.storage_provider == STORAGE_PROVIDER_GOOGLEDRIVE
+    assert settings.google_drive_client_id == "client-id"
+    assert settings.google_drive_client_secret == "client-secret"
+    assert settings.google_drive_folder_id == "folder-id"
+    assert settings.google_drive_batch_window_seconds == 75
+    assert settings.google_drive_access_token == "access"
+    assert settings.google_drive_refresh_token == "refresh"
+
+
+def test_load_settings_google_drive_provider_with_missing_node(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Provider selection should not crash when storage.google_drive node is absent."""
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "\n".join(
+            [
+                "telegram_token: token",
+                "allowed_user_ids: [1]",
+                "storage:",
+                "  provider: google_drive",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="storage.google_drive.client_id"):
+        load_settings(config_path=yaml_path)
 
 
 def test_load_settings_defaults_and_yaml_cli_priority(

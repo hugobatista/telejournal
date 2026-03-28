@@ -27,6 +27,7 @@ Captured content is appended to your daily note with timestamped entries and str
   - `obsidian_vault` (filesystem)
   - `github_repo` (GitHub repository via REST API)
   - `onedrive` (Microsoft OneDrive via Microsoft Graph API)
+  - `google_drive` (Google Drive via Drive API)
 - YAML frontmatter management for `mood`, `tags`, and `created`
 - In-memory state only (`context.chat_data` and `context.bot_data`)
 - Date override commands (`/setdate`, `/resetdate`)
@@ -163,6 +164,27 @@ Useful OneDrive auth commands:
 - `/storageauth start` Start/restart the device code flow
 - `/storageauth complete` Poll once to finish authorization and persist tokens
 
+Google Drive storage provider example:
+
+```bash
+telejournal run \
+  --telegram-token your_token \
+  --storage-provider google_drive \
+  --google-drive-client-id your_google_client_id \
+  --google-drive-client-secret your_google_client_secret \
+  --google-drive-folder-id your_drive_folder_id \
+  --google-drive-batch-window-seconds 60 \
+  --allowed-user-ids 123456,987654
+```
+
+When using `google_drive`, writes and media uploads are queued in-memory and
+flushed in bursts every `batch_window_seconds` (default: `60`).
+
+For first-time setup, only `--google-drive-client-id` and
+`--google-drive-client-secret` are required. On startup, telejournal sends
+Google Drive device authorization instructions to allowed chats. Complete the
+browser flow, then run `/storageauth complete` to capture and persist tokens.
+
 ### Telegram Commands
 
 After the bot is running, these commands are available in your private chat:
@@ -180,7 +202,7 @@ After the bot is running, these commands are available in your private chat:
 - `/delete` Delete last entry and show deleted content
 - `/delete day [YYYY-MM-DD]` Delete full day note
 - `/settings` Guided runtime configuration for `tag_choices`, `daily_brief_time_utc`, `prompt_for_mood_if_missing`, and `bot_menu_enabled`
-- `/storageauth [start|complete|status]` OneDrive device authorization workflow (only when `storage.provider` is `onedrive`)
+- `/storageauth [start|complete|status]` Storage device authorization workflow (when `storage.provider` is `onedrive` or `google_drive`)
   - Changes are persisted immediately.
   - If the bot started from a YAML config file, that file is backed up and updated.
   - If no YAML config was used, `./config.yaml` is created/updated.
@@ -239,6 +261,14 @@ STORAGE_OBSIDIAN_VAULT_ROOT=/path/to/obsidian/vault
   - `STORAGE_ONEDRIVE_ACCESS_TOKEN` (optional cached access token)
   - `STORAGE_ONEDRIVE_REFRESH_TOKEN` (optional cached refresh token)
   - `STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC` (optional UTC expiry `YYYY-MM-DDTHH:MM:SSZ`)
+- Google Drive provider variables:
+  - `STORAGE_GOOGLE_DRIVE_CLIENT_ID` (required for `google_drive`)
+  - `STORAGE_GOOGLE_DRIVE_CLIENT_SECRET` (required for `google_drive`)
+  - `STORAGE_GOOGLE_DRIVE_FOLDER_ID` (optional; defaults to My Drive root)
+  - `STORAGE_GOOGLE_DRIVE_BATCH_WINDOW_SECONDS` (default: `60`)
+  - `STORAGE_GOOGLE_DRIVE_ACCESS_TOKEN` (optional cached access token)
+  - `STORAGE_GOOGLE_DRIVE_REFRESH_TOKEN` (optional cached refresh token)
+  - `STORAGE_GOOGLE_DRIVE_TOKEN_EXPIRES_AT_UTC` (optional UTC expiry `YYYY-MM-DDTHH:MM:SSZ`)
 
 For `github_repo`, use a fine-grained personal access token scoped to exactly one target repository, with `Contents` read/write permissions.
 
@@ -272,7 +302,7 @@ allowed_user_ids:
   - 123456
   - 987654
 storage:
-  provider: obsidian_vault # obsidian_vault, github_repo, or onedrive
+  provider: obsidian_vault # obsidian_vault, github_repo, onedrive, or google_drive
   obsidian_vault:
     root: /path/to/obsidian/vault
     secure_file_permissions: true
@@ -294,6 +324,14 @@ storage:
     access_token: "${STORAGE_ONEDRIVE_ACCESS_TOKEN}"
     refresh_token: "${STORAGE_ONEDRIVE_REFRESH_TOKEN}"
     token_expires_at_utc: "${STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC}"
+  google_drive:
+    client_id: "${STORAGE_GOOGLE_DRIVE_CLIENT_ID}"
+    client_secret: "${STORAGE_GOOGLE_DRIVE_CLIENT_SECRET}"
+    folder_id: "${STORAGE_GOOGLE_DRIVE_FOLDER_ID}"
+    batch_window_seconds: 60
+    access_token: "${STORAGE_GOOGLE_DRIVE_ACCESS_TOKEN}"
+    refresh_token: "${STORAGE_GOOGLE_DRIVE_REFRESH_TOKEN}"
+    token_expires_at_utc: "${STORAGE_GOOGLE_DRIVE_TOKEN_EXPIRES_AT_UTC}"
 log_level: INFO
 message_timestamp_window_seconds: 60
 daily_brief_time_utc: "0"

@@ -4,17 +4,19 @@ from .constants import (
     DEFAULT_SETTINGS,
     DEFAULT_TAG_CHOICES,
     STORAGE_PROVIDER_GITHUB,
+    STORAGE_PROVIDER_GOOGLEDRIVE,
     STORAGE_PROVIDER_OBSIDIAN,
     STORAGE_PROVIDER_ONEDRIVE,
 )
+from .merge import merge_configs as _merge_configs
 from .models import (
     GitHubRepoConfig,
+    GoogleDriveConfig,
     ObsidianVaultConfig,
     OneDriveConfig,
     Settings,
     StorageSettings,
 )
-from .merge import merge_configs as _merge_configs
 from .parsers import (
     normalize_allowed_user_ids as _normalize_allowed_user_ids,
     parse_allowed_user_ids as _parse_allowed_user_ids,
@@ -27,9 +29,11 @@ __all__ = [
     "DEFAULT_SETTINGS",
     "DEFAULT_TAG_CHOICES",
     "GitHubRepoConfig",
+    "GoogleDriveConfig",
     "ObsidianVaultConfig",
     "OneDriveConfig",
     "STORAGE_PROVIDER_GITHUB",
+    "STORAGE_PROVIDER_GOOGLEDRIVE",
     "STORAGE_PROVIDER_OBSIDIAN",
     "STORAGE_PROVIDER_ONEDRIVE",
     "Settings",

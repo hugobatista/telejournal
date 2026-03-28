@@ -50,7 +50,11 @@ from telejournal.runtime_config import (
     format_runtime_config_summary,
     persist_runtime_settings,
 )
-from telejournal.storage import OneDriveAuthorizationRequiredError, build_repository
+from telejournal.storage import (
+    GoogleDriveAuthorizationRequiredError,
+    OneDriveAuthorizationRequiredError,
+    build_repository,
+)
 
 __all__ = ["JournalBot"]
 
@@ -1236,7 +1240,13 @@ class JournalBot:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Log unexpected handler errors and return a generic user message."""
-        if isinstance(context.error, OneDriveAuthorizationRequiredError):
+        if isinstance(
+            context.error,
+            (
+                OneDriveAuthorizationRequiredError,
+                GoogleDriveAuthorizationRequiredError,
+            ),
+        ):
             if isinstance(update, Update) and update.effective_message:
                 await update.effective_message.reply_text(str(context.error))
             return

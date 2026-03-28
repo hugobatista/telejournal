@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from telejournal.config import STORAGE_PROVIDER_ONEDRIVE
+from telejournal.config import (
+    STORAGE_PROVIDER_GOOGLEDRIVE,
+    STORAGE_PROVIDER_ONEDRIVE,
+)
 
 
 @dataclass(frozen=True)
@@ -67,8 +70,10 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     CommandSpec(
         command="storageauth",
         callback_name="storageauth_command",
-        help_line="/storageauth [start|complete|status]  OneDrive device auth workflow",
-        provider_scope=frozenset({STORAGE_PROVIDER_ONEDRIVE}),
+        help_line="/storageauth [start|complete|status]  Storage device auth workflow",
+        provider_scope=frozenset(
+            {STORAGE_PROVIDER_ONEDRIVE, STORAGE_PROVIDER_GOOGLEDRIVE}
+        ),
     ),
     CommandSpec(
         command="help",

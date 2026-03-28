@@ -17,6 +17,7 @@ DEFAULT_TAG_CHOICES: tuple[str, ...] = (
 STORAGE_PROVIDER_OBSIDIAN = "obsidian_vault"
 STORAGE_PROVIDER_GITHUB = "github_repo"
 STORAGE_PROVIDER_ONEDRIVE = "onedrive"
+STORAGE_PROVIDER_GOOGLEDRIVE = "google_drive"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "log_level": "INFO",
@@ -41,6 +42,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
             "client_secret": None,
             "root_path": "Apps/telejournal",
             "api_base_url": "https://graph.microsoft.com/v1.0",
+            "batch_window_seconds": 60,
+        },
+        "google_drive": {
             "batch_window_seconds": 60,
         },
     },

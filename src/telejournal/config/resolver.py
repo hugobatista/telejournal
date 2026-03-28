@@ -11,12 +11,14 @@ from telejournal.config_loader import expand_env_vars, load_env_config, load_yam
 from .constants import (
     DEFAULT_SETTINGS,
     STORAGE_PROVIDER_GITHUB,
+    STORAGE_PROVIDER_GOOGLEDRIVE,
     STORAGE_PROVIDER_OBSIDIAN,
     STORAGE_PROVIDER_ONEDRIVE,
 )
 from .merge import merge_configs, storage_node
 from .models import (
     GitHubRepoConfig,
+    GoogleDriveConfig,
     ObsidianVaultConfig,
     OneDriveConfig,
     Settings,
@@ -60,9 +62,11 @@ def load_settings(
         STORAGE_PROVIDER_OBSIDIAN,
         STORAGE_PROVIDER_GITHUB,
         STORAGE_PROVIDER_ONEDRIVE,
+        STORAGE_PROVIDER_GOOGLEDRIVE,
     ):
         raise ValueError(
-            "storage.provider must be 'obsidian_vault', 'github_repo', or 'onedrive'"
+            "storage.provider must be 'obsidian_vault', 'github_repo', "
+            "'onedrive', or 'google_drive'"
         )
 
     vault_root = Path(".").resolve()
@@ -83,6 +87,13 @@ def load_settings(
     onedrive_access_token: str | None = None
     onedrive_refresh_token: str | None = None
     onedrive_token_expires_at_utc: str | None = None
+    google_drive_client_id: str | None = None
+    google_drive_client_secret: str | None = None
+    google_drive_folder_id: str | None = None
+    google_drive_batch_window_seconds = 60
+    google_drive_access_token: str | None = None
+    google_drive_refresh_token: str | None = None
+    google_drive_token_expires_at_utc: str | None = None
 
     storage_settings: StorageSettings
 
@@ -142,7 +153,7 @@ def load_settings(
                 batch_window_seconds=github_batch_window_seconds,
             ),
         )
-    else:
+    elif storage_provider == STORAGE_PROVIDER_ONEDRIVE:
         onedrive = storage["onedrive"]
         onedrive_tenant_id = str(onedrive.get("tenant_id", "common")).strip()
         if not onedrive_tenant_id:
@@ -211,6 +222,60 @@ def load_settings(
                 token_expires_at_utc=onedrive_token_expires_at_utc,
             ),
         )
+    else:
+        google_drive = storage["google_drive"]
+        raw_client_id = str(google_drive.get("client_id") or "").strip()
+        google_drive_client_id = raw_client_id or None
+        raw_client_secret = str(google_drive.get("client_secret") or "").strip()
+        google_drive_client_secret = raw_client_secret or None
+        raw_folder_id = str(google_drive.get("folder_id") or "").strip()
+        google_drive_folder_id = raw_folder_id or None
+        google_drive_batch_window_seconds = int(
+            google_drive.get("batch_window_seconds", 60)
+        )
+
+        raw_access_token = str(google_drive.get("access_token", "")).strip()
+        google_drive_access_token = raw_access_token or None
+        raw_refresh_token = str(google_drive.get("refresh_token", "")).strip()
+        google_drive_refresh_token = raw_refresh_token or None
+        raw_expires_at = str(google_drive.get("token_expires_at_utc", "")).strip()
+        google_drive_token_expires_at_utc = raw_expires_at or None
+
+        if google_drive_client_id is None:
+            raise ValueError(
+                "storage.google_drive.client_id is required for google_drive provider"
+            )
+        if google_drive_client_secret is None:
+            raise ValueError(
+                "storage.google_drive.client_secret is required for google_drive provider"
+            )
+        if google_drive_batch_window_seconds < 1:
+            raise ValueError("storage.google_drive.batch_window_seconds must be >= 1")
+
+        if google_drive_token_expires_at_utc is not None:
+            try:
+                datetime.strptime(
+                    google_drive_token_expires_at_utc,
+                    "%Y-%m-%dT%H:%M:%SZ",
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    "storage.google_drive.token_expires_at_utc must be ISO UTC "
+                    "format YYYY-MM-DDTHH:MM:SSZ"
+                ) from exc
+
+        storage_settings = StorageSettings(
+            provider=storage_provider,
+            google_drive=GoogleDriveConfig(
+                client_id=google_drive_client_id,
+                client_secret=google_drive_client_secret,
+                folder_id=google_drive_folder_id,
+                batch_window_seconds=google_drive_batch_window_seconds,
+                access_token=google_drive_access_token,
+                refresh_token=google_drive_refresh_token,
+                token_expires_at_utc=google_drive_token_expires_at_utc,
+            ),
+        )
 
     log_level = str(merged.get("log_level", "INFO")).strip().upper() or "INFO"
     window_seconds = int(merged.get("message_timestamp_window_seconds", 60))
@@ -255,5 +320,12 @@ def load_settings(
         onedrive_access_token=onedrive_access_token,
         onedrive_refresh_token=onedrive_refresh_token,
         onedrive_token_expires_at_utc=onedrive_token_expires_at_utc,
+        google_drive_client_id=google_drive_client_id,
+        google_drive_client_secret=google_drive_client_secret,
+        google_drive_folder_id=google_drive_folder_id,
+        google_drive_batch_window_seconds=google_drive_batch_window_seconds,
+        google_drive_access_token=google_drive_access_token,
+        google_drive_refresh_token=google_drive_refresh_token,
+        google_drive_token_expires_at_utc=google_drive_token_expires_at_utc,
         storage=storage_settings,
     )

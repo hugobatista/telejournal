@@ -106,6 +106,19 @@ def _serialize_settings_for_yaml(settings: Settings) -> dict[str, Any]:
                 "token_expires_at_utc": settings.onedrive_token_expires_at_utc,
             },
         }
+    elif settings.storage_provider == "google_drive":
+        storage_payload = {
+            "provider": "google_drive",
+            "google_drive": {
+                "client_id": settings.google_drive_client_id,
+                "client_secret": settings.google_drive_client_secret,
+                "folder_id": settings.google_drive_folder_id,
+                "batch_window_seconds": settings.google_drive_batch_window_seconds,
+                "access_token": settings.google_drive_access_token,
+                "refresh_token": settings.google_drive_refresh_token,
+                "token_expires_at_utc": settings.google_drive_token_expires_at_utc,
+            },
+        }
     else:
         storage_payload = {
             "provider": "obsidian_vault",
