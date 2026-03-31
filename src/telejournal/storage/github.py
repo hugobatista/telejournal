@@ -20,11 +20,22 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
-from .common import LOGGER, NoteData, PendingWrite, _TIMESTAMP_RE
+from .common import (
+    LOGGER,
+    FlushEvent,
+    FlushEventPublisher,
+    NoteData,
+    PendingWrite,
+    ProviderCapabilities,
+    WriteVisibility,
+    _TIMESTAMP_RE,
+)
 
 
-class GitHubRepository:
+class GitHubRepository(FlushEventPublisher):
     """Persist journal notes in a GitHub repository via the REST API."""
+
+    capabilities = ProviderCapabilities(write_visibility=WriteVisibility.BUFFERED)
 
     def __init__(
         self,
@@ -37,6 +48,7 @@ class GitHubRepository:
         batch_window_seconds: int = 60,
     ) -> None:
         """Initialize a GitHub repository-backed storage provider."""
+        super().__init__()
         self._owner = owner.strip()
         self._repo = repo.strip()
         self._token = token.strip()
@@ -245,6 +257,15 @@ class GitHubRepository:
             LOGGER.info(
                 "GitHub batch #%d flush completed successfully",
                 self._flush_cycle,
+            )
+            self._emit_flush_event(
+                FlushEvent(
+                    provider="github_repo",
+                    flush_cycle=self._flush_cycle,
+                    upserts=len(pending_puts),
+                    deletes=len(pending_deletes),
+                    reason=reason,
+                )
             )
 
     @property

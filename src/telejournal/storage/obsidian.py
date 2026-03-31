@@ -16,11 +16,19 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
-from .common import LOGGER, NoteData, _TIMESTAMP_RE
+from .common import (
+    LOGGER,
+    NoteData,
+    ProviderCapabilities,
+    WriteVisibility,
+    _TIMESTAMP_RE,
+)
 
 
 class VaultRepository:
     """Manage journal note and attachment persistence in the vault."""
+
+    capabilities = ProviderCapabilities(write_visibility=WriteVisibility.IMMEDIATE)
 
     def __init__(self, vault_root: Path, secure_permissions: bool = True) -> None:
         """Initialize a repository rooted at an Obsidian vault path.

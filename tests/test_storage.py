@@ -18,12 +18,15 @@ import yaml
 from telejournal.formatting import marker_end_comment, marker_start_comment
 from telejournal.config import Settings
 from telejournal.storage import (
+    FlushEvent,
     GitHubRepository,
     GoogleDriveRepository,
     NoteData,
     OneDriveAuthorizationRequiredError,
     OneDriveRepository,
+    ProviderCapabilities,
     VaultRepository,
+    WriteVisibility,
     build_repository,
 )
 
@@ -1251,6 +1254,122 @@ async def test_github_repository_batch_retry_and_delete_queue(
 
     await repo.flush_pending(reason="retry")
     assert puts == ["2026/2026-03-07.md"]
+
+
+@pytest.mark.asyncio
+async def test_github_repository_emits_flush_event_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful batched flushes should emit one provider flush event."""
+    monkeypatch.setattr(
+        GitHubRepository,
+        "_warn_if_repository_is_public",
+        lambda _s: None,
+    )
+    repo = GitHubRepository("acme", "journal", "token")
+    monkeypatch.setattr(repo, "_ensure_flush_task", lambda: None)
+
+    monkeypatch.setattr(repo, "_get_content", lambda _p: {"sha": "sha-1"})
+    monkeypatch.setattr(repo, "_put_content", lambda *_a, **_k: None)
+
+    events: list[FlushEvent] = []
+    repo.add_flush_listener(events.append)
+
+    await repo._queue_put_content("2026/2026-03-07.md", b"hello", "update")
+    await repo.flush_pending(reason="test")
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.provider == "github_repo"
+    assert event.reason == "test"
+    assert event.upserts == 1
+
+
+def test_storage_provider_capabilities_are_explicit() -> None:
+    """Providers should declare write visibility explicitly via capabilities."""
+    assert isinstance(VaultRepository.capabilities, ProviderCapabilities)
+    assert VaultRepository.capabilities.write_visibility == WriteVisibility.IMMEDIATE
+
+    assert isinstance(GitHubRepository.capabilities, ProviderCapabilities)
+    assert GitHubRepository.capabilities.write_visibility == WriteVisibility.BUFFERED
+
+    assert isinstance(OneDriveRepository.capabilities, ProviderCapabilities)
+    assert OneDriveRepository.capabilities.write_visibility == WriteVisibility.BUFFERED
+
+    assert isinstance(GoogleDriveRepository.capabilities, ProviderCapabilities)
+    assert (
+        GoogleDriveRepository.capabilities.write_visibility == WriteVisibility.BUFFERED
+    )
+
+
+def test_flush_event_publisher_deduplicates_listener_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registering the same listener twice should only notify it once."""
+    monkeypatch.setattr(
+        GitHubRepository,
+        "_warn_if_repository_is_public",
+        lambda _s: None,
+    )
+    repo = GitHubRepository("acme", "journal", "token")
+
+    seen: list[FlushEvent] = []
+    repo.add_flush_listener(seen.append)
+    repo.add_flush_listener(seen.append)
+
+    repo._emit_flush_event(
+        FlushEvent(
+            provider="github_repo",
+            flush_cycle=1,
+            upserts=1,
+            deletes=0,
+            reason="test",
+        )
+    )
+
+    assert len(seen) == 1
+
+
+def test_flush_event_publisher_handles_listener_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Listener failures should be logged and should not stop next listeners."""
+    monkeypatch.setattr(
+        GitHubRepository,
+        "_warn_if_repository_is_public",
+        lambda _s: None,
+    )
+    repo = GitHubRepository("acme", "journal", "token")
+
+    logged: list[str] = []
+    monkeypatch.setattr(
+        "telejournal.storage.common.LOGGER.exception",
+        lambda message: logged.append(message),
+    )
+
+    seen: list[str] = []
+
+    def _failing_listener(_event: FlushEvent) -> None:
+        raise RuntimeError("boom")
+
+    def _ok_listener(_event: FlushEvent) -> None:
+        seen.append("ok")
+
+    repo.add_flush_listener(_failing_listener)
+    repo.add_flush_listener(_ok_listener)
+
+    repo._emit_flush_event(
+        FlushEvent(
+            provider="github_repo",
+            flush_cycle=1,
+            upserts=1,
+            deletes=0,
+            reason="test",
+        )
+    )
+
+    assert seen == ["ok"]
+    assert logged
 
 
 @pytest.mark.asyncio

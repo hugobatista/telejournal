@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import UTC, datetime, time
@@ -51,8 +52,11 @@ from telejournal.runtime_config import (
     persist_runtime_settings,
 )
 from telejournal.storage import (
+    FlushEvent,
     GoogleDriveAuthorizationRequiredError,
     OneDriveAuthorizationRequiredError,
+    SupportsFlushEventSubscription,
+    WriteVisibility,
     build_repository,
 )
 
@@ -90,6 +94,10 @@ STARTUP_MESSAGE = "Hello! Telejournal is starting."
 DAILY_BRIEF_JOB_NAME = "daily-brief"
 NO_MEMORIES_MESSAGE = "No memories today"
 MAX_TRACKED_REPLY_SOURCES = 2000
+FLUSH_NOTIFY_SECONDS = 1
+ADDED_ACK = "Added to journal ✅"
+QUEUED_ACK = "Queued to journal ✅"
+FLUSHED_ACK = "Flushed to journal ✅"
 
 
 class JournalBot:
@@ -100,6 +108,9 @@ class JournalBot:
         self._settings = settings
         self._repository = build_repository(settings)
         self._reply_source_notes: dict[int, dict[int, datetime]] = {}
+        self._pending_flush_chat_ids: set[int] = set()
+        self._storage_flush_events: asyncio.Queue[FlushEvent] = asyncio.Queue()
+        self._register_storage_flush_listener_if_supported()
         self._note_delivery = NoteDeliveryService(
             repository_provider=lambda: self._repository,
             track_reply_source_message=self._track_reply_source_message,
@@ -353,6 +364,57 @@ class JournalBot:
         if not update.effective_chat:
             return None
         return update.effective_chat.id
+
+    def _storage_is_buffered(self) -> bool:
+        """Return whether active storage provider flushes writes asynchronously."""
+        return (
+            self._repository.capabilities.write_visibility == WriteVisibility.BUFFERED
+        )
+
+    def _register_storage_flush_listener_if_supported(self) -> None:
+        """Subscribe to flush events for providers with buffered writes."""
+        if not self._storage_is_buffered():
+            return
+
+        listener_source = cast(SupportsFlushEventSubscription, self._repository)
+        listener_source.add_flush_listener(self._on_storage_flush_event)
+
+    def _on_storage_flush_event(self, event: FlushEvent) -> None:
+        """Queue provider flush events for delivery in Telegram job context."""
+        self._storage_flush_events.put_nowait(event)
+
+    async def _acknowledge_successful_write(
+        self,
+        chat_id: int,
+        reply: Any,
+    ) -> None:
+        """Send write acknowledgment based on provider flush semantics."""
+        if self._storage_is_buffered():
+            self._pending_flush_chat_ids.add(chat_id)
+            await reply(QUEUED_ACK)
+            return
+
+        await reply(ADDED_ACK)
+
+    async def _dispatch_storage_flush_notifications(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Deliver flush completion notifications to chats awaiting flush."""
+        saw_event = False
+        while True:
+            try:
+                _event = self._storage_flush_events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            saw_event = True
+
+        if not saw_event or not self._pending_flush_chat_ids:
+            return
+
+        for chat_id in sorted(self._pending_flush_chat_ids):
+            await context.bot.send_message(chat_id, FLUSHED_ACK)
+        self._pending_flush_chat_ids.clear()
 
     def _reschedule_daily_brief(
         self,
@@ -675,7 +737,7 @@ class JournalBot:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Run OneDrive authorization workflow using device-code flow."""
+        """Run storage authorization workflow using device-code flow."""
         await self._commands.storageauth_command(update, context)
 
     async def _record_entry(
@@ -785,7 +847,13 @@ class JournalBot:
 
     async def flush_album_entry(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Flush a buffered album to a single note entry."""
-        await self._media_entries.flush_album_entry(context)
+        chat_id = await self._media_entries.flush_album_entry(context)
+        if chat_id is None:
+            return
+        await self._acknowledge_successful_write(
+            chat_id,
+            lambda text: context.bot.send_message(chat_id, text),
+        )
 
     async def _handle_location(
         self,
@@ -993,7 +1061,11 @@ class JournalBot:
                 return
 
             if updated:
-                await message.reply_text("✅ Edited entry updated in journal.")
+                if self._storage_is_buffered():
+                    self._pending_flush_chat_ids.add(chat_id)
+                    await message.reply_text("Edited entry queued to journal ✅")
+                else:
+                    await message.reply_text("Edited entry updated in journal ✅")
             else:
                 await message.reply_text(
                     "⚠️ Could not locate original entry to edit. "
@@ -1078,7 +1150,7 @@ class JournalBot:
             return
 
         if wrote_entry:
-            await message.reply_text("✅ Added to journal.")
+            await self._acknowledge_successful_write(chat_id, message.reply_text)
             await self._prompt_for_mood_if_missing(message, chat_data, note_dt, now)
 
         LOGGER.info(
@@ -1161,6 +1233,13 @@ class JournalBot:
             )
             chat_data[LAST_PROMPT_AT_KEY] = now
             chat_data[LAST_PROMPT_NOTE_KEY] = note_key
+
+    async def dispatch_storage_flush_notifications(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Periodic task to send flush completion notifications, if any."""
+        await self._dispatch_storage_flush_notifications(context)
 
     async def send_startup_message(
         self,
@@ -1303,6 +1382,11 @@ class JournalBot:
     def register_jobs(self, job_queue: JobQueue) -> None:  # type: ignore[type-arg]
         """Register periodic reminder jobs."""
         job_queue.run_once(self.send_startup_message, when=0, name=STARTUP_JOB_NAME)
+        job_queue.run_repeating(
+            self.dispatch_storage_flush_notifications,
+            interval=FLUSH_NOTIFY_SECONDS,
+            first=FLUSH_NOTIFY_SECONDS,
+        )
         job_queue.run_repeating(self.check_mood_timers, interval=300, first=300)
         if self._settings.daily_brief_time_utc is not None:
             job_queue.run_daily(

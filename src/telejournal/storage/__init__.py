@@ -1,9 +1,15 @@
 """Storage providers and repository factory."""
 
 from .common import (
+    FlushEvent,
+    FlushEventPublisher,
     NoteData,
     PendingWrite,
+    ProviderCapabilities,
+    SupportsFlushEventSubscription,
+    SupportsProviderCapabilities,
     StorageAuthorizationRequiredError,
+    WriteVisibility,
 )
 from .factory import build_repository
 from .github import GitHubRepository
@@ -20,9 +26,15 @@ __all__ = [
     "GoogleDriveRepository",
     "GoogleDriveAuthorizationRequiredError",
     "NoteData",
+    "FlushEvent",
+    "FlushEventPublisher",
     "OneDriveAuthorizationRequiredError",
     "OneDriveRepository",
     "PendingWrite",
+    "ProviderCapabilities",
+    "SupportsFlushEventSubscription",
+    "SupportsProviderCapabilities",
     "StorageAuthorizationRequiredError",
     "VaultRepository",
+    "WriteVisibility",
 ]

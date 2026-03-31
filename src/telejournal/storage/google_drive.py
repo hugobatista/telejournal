@@ -21,10 +21,14 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
 from .common import (
+    FlushEvent,
+    FlushEventPublisher,
     LOGGER,
     NoteData,
     PendingWrite,
+    ProviderCapabilities,
     StorageAuthorizationRequiredError,
+    WriteVisibility,
     _TIMESTAMP_RE,
 )
 from .github import GitHubRepository
@@ -34,7 +38,7 @@ class GoogleDriveAuthorizationRequiredError(StorageAuthorizationRequiredError):
     """Raised when Google Drive operations require interactive device auth."""
 
 
-class GoogleDriveRepository:  # pragma: no cover
+class GoogleDriveRepository(FlushEventPublisher):  # pragma: no cover
     """Persist journal notes in Google Drive through Drive API v3."""
 
     _DEFAULT_SCOPE = "https://www.googleapis.com/auth/drive.file"
@@ -43,6 +47,7 @@ class GoogleDriveRepository:  # pragma: no cover
     _API_BASE_URL = "https://www.googleapis.com/drive/v3"
     _UPLOAD_BASE_URL = "https://www.googleapis.com/upload/drive/v3"
     _APP_PATH_KEY = "telejournal_path"
+    capabilities = ProviderCapabilities(write_visibility=WriteVisibility.BUFFERED)
 
     def __init__(
         self,
@@ -56,6 +61,7 @@ class GoogleDriveRepository:  # pragma: no cover
         config_path: Path | None = None,
     ) -> None:
         """Initialize a Google Drive-backed storage provider."""
+        super().__init__()
         self._client_id = client_id.strip()
         self._client_secret = client_secret.strip()
         self._folder_id = folder_id.strip()
@@ -953,6 +959,15 @@ class GoogleDriveRepository:  # pragma: no cover
             LOGGER.info(
                 "Google Drive batch #%d flush completed successfully",
                 self._flush_cycle,
+            )
+            self._emit_flush_event(
+                FlushEvent(
+                    provider="google_drive",
+                    flush_cycle=self._flush_cycle,
+                    upserts=len(pending_puts),
+                    deletes=len(pending_deletes),
+                    reason=reason,
+                )
             )
 
     async def _read_note(self, note_path: str) -> tuple[NoteData, str | None]:

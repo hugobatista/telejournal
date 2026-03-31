@@ -311,7 +311,7 @@ class CommandHandlerService:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Run OneDrive device authorization steps for first-time setup."""
+        """Run storage device authorization steps for first-time setup."""
         if not self._is_private_and_authorized(update):
             return
         if not update.effective_message:

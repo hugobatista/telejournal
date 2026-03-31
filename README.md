@@ -137,6 +137,11 @@ When using `github_repo`, note writes and media uploads are queued in-memory and
 flushed in burst commits every `batch_window_seconds` (default: `60`). Bot
 feedback remains immediate, while GitHub API traffic is reduced.
 
+For queued providers (`github_repo`, `onedrive`, and `google_drive`), the bot
+acknowledges new entries with `Queued to journal ✅` and sends
+`Flushed to journal ✅` after a successful provider flush cycle. For immediate
+storage (`obsidian_vault`), the acknowledgment remains `Added to journal ✅`.
+
 During shutdown, telejournal performs a best-effort final flush of queued
 GitHub writes (for example, when receiving SIGTERM in container stop flows).
 

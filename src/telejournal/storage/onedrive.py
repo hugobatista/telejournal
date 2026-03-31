@@ -21,10 +21,14 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
 from .common import (
+    FlushEvent,
+    FlushEventPublisher,
     LOGGER,
     NoteData,
     PendingWrite,
+    ProviderCapabilities,
     StorageAuthorizationRequiredError,
+    WriteVisibility,
     _TIMESTAMP_RE,
 )
 from .github import GitHubRepository
@@ -34,10 +38,11 @@ class OneDriveAuthorizationRequiredError(StorageAuthorizationRequiredError):
     """Raised when OneDrive operations require interactive device authorization."""
 
 
-class OneDriveRepository:  # pragma: no cover
+class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
     """Persist journal notes in OneDrive through Microsoft Graph."""
 
     _DEFAULT_SCOPE = "offline_access Files.ReadWrite"
+    capabilities = ProviderCapabilities(write_visibility=WriteVisibility.BUFFERED)
 
     def __init__(
         self,
@@ -53,6 +58,7 @@ class OneDriveRepository:  # pragma: no cover
         config_path: Path | None = None,
     ) -> None:
         """Initialize a OneDrive-backed storage provider."""
+        super().__init__()
         self._tenant_id = tenant_id.strip() or "common"
         self._client_id = client_id.strip()
         self._client_secret = client_secret.strip()
@@ -1052,6 +1058,15 @@ class OneDriveRepository:  # pragma: no cover
 
             LOGGER.info(
                 "OneDrive batch #%d flush completed successfully", self._flush_cycle
+            )
+            self._emit_flush_event(
+                FlushEvent(
+                    provider="onedrive",
+                    flush_cycle=self._flush_cycle,
+                    upserts=len(pending_puts),
+                    deletes=len(pending_deletes),
+                    reason=reason,
+                )
             )
 
     async def _read_note(self, note_path: str) -> tuple[NoteData, str | None]:
