@@ -1,6 +1,6 @@
 [project]
 name = "telejournal"
-version = "0.0.3"
+version = "0.1.0"
 description = "Telegram bot that journals private messages into an Obsidian vault"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ dev = [
     "types-aiofiles>=24.1.0.20241221",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "hatch>=1.14.0",
 ]
 
 [project.scripts]
@@ -36,6 +37,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/telejournal"]
+
+[tool.hatch.envs.default]
+features = ["dev"]
+
+[tool.hatch.envs.default.scripts]
+lint = "ruff check . --fix"
+format = "black ."
+format-check = "black --check ."
+test = "pytest src tests --cov=src/telejournal --cov-fail-under=100 -v"
+typecheck = "mypy src --strict --no-incremental"
+validate = ["lint", "format", "test", "typecheck"]
+check = ["lint", "format", "test", "typecheck"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

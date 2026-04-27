@@ -88,6 +88,36 @@ def load_env_config() -> dict[str, Any]:
     github_batch_window_seconds = os.getenv(
         "STORAGE_GITHUB_BATCH_WINDOW_SECONDS", ""
     ).strip()
+    onedrive_tenant_id = os.getenv("STORAGE_ONEDRIVE_TENANT_ID", "").strip()
+    onedrive_client_id = os.getenv("STORAGE_ONEDRIVE_CLIENT_ID", "").strip()
+    onedrive_client_secret = os.getenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "").strip()
+    onedrive_root_path = os.getenv("STORAGE_ONEDRIVE_ROOT_PATH", "").strip()
+    onedrive_api_base_url = os.getenv("STORAGE_ONEDRIVE_API_BASE_URL", "").strip()
+    onedrive_batch_window_seconds = os.getenv(
+        "STORAGE_ONEDRIVE_BATCH_WINDOW_SECONDS", ""
+    ).strip()
+    onedrive_access_token = os.getenv("STORAGE_ONEDRIVE_ACCESS_TOKEN", "").strip()
+    onedrive_refresh_token = os.getenv("STORAGE_ONEDRIVE_REFRESH_TOKEN", "").strip()
+    onedrive_token_expires_at_utc = os.getenv(
+        "STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC", ""
+    ).strip()
+    google_drive_client_id = os.getenv("STORAGE_GOOGLE_DRIVE_CLIENT_ID", "").strip()
+    google_drive_client_secret = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_CLIENT_SECRET", ""
+    ).strip()
+    google_drive_folder_id = os.getenv("STORAGE_GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    google_drive_batch_window_seconds = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_BATCH_WINDOW_SECONDS", ""
+    ).strip()
+    google_drive_access_token = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_ACCESS_TOKEN", ""
+    ).strip()
+    google_drive_refresh_token = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_REFRESH_TOKEN", ""
+    ).strip()
+    google_drive_token_expires_at_utc = os.getenv(
+        "STORAGE_GOOGLE_DRIVE_TOKEN_EXPIRES_AT_UTC", ""
+    ).strip()
 
     has_storage = any(
         (
@@ -101,6 +131,22 @@ def load_env_config() -> dict[str, Any]:
             github_path_prefix,
             github_api_base_url,
             github_batch_window_seconds,
+            onedrive_tenant_id,
+            onedrive_client_id,
+            onedrive_client_secret,
+            onedrive_root_path,
+            onedrive_api_base_url,
+            onedrive_batch_window_seconds,
+            onedrive_access_token,
+            onedrive_refresh_token,
+            onedrive_token_expires_at_utc,
+            google_drive_client_id,
+            google_drive_client_secret,
+            google_drive_folder_id,
+            google_drive_batch_window_seconds,
+            google_drive_access_token,
+            google_drive_refresh_token,
+            google_drive_token_expires_at_utc,
         )
     )
     if has_storage:
@@ -118,6 +164,26 @@ def load_env_config() -> dict[str, Any]:
                 "path_prefix": github_path_prefix or None,
                 "api_base_url": github_api_base_url or None,
                 "batch_window_seconds": github_batch_window_seconds or None,
+            },
+            "onedrive": {
+                "tenant_id": onedrive_tenant_id or None,
+                "client_id": onedrive_client_id or None,
+                "client_secret": onedrive_client_secret or None,
+                "root_path": onedrive_root_path or None,
+                "api_base_url": onedrive_api_base_url or None,
+                "batch_window_seconds": onedrive_batch_window_seconds or None,
+                "access_token": onedrive_access_token or None,
+                "refresh_token": onedrive_refresh_token or None,
+                "token_expires_at_utc": onedrive_token_expires_at_utc or None,
+            },
+            "google_drive": {
+                "client_id": google_drive_client_id or None,
+                "client_secret": google_drive_client_secret or None,
+                "folder_id": google_drive_folder_id or None,
+                "batch_window_seconds": google_drive_batch_window_seconds or None,
+                "access_token": google_drive_access_token or None,
+                "refresh_token": google_drive_refresh_token or None,
+                "token_expires_at_utc": google_drive_token_expires_at_utc or None,
             },
         }
         config["storage"] = storage

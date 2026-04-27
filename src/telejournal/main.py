@@ -52,10 +52,26 @@ def _build_cli_overrides(
     github_path_prefix: str | None,
     github_api_base_url: str | None,
     github_batch_window_seconds: int | None,
-    allowed_user_ids: str | None,
-    log_level: str | None,
-    message_timestamp_window_seconds: int | None,
-    daily_brief_time_utc: str | None,
+    onedrive_tenant_id: str | None,
+    onedrive_client_id: str | None,
+    onedrive_client_secret: str | None,
+    onedrive_root_path: str | None,
+    onedrive_api_base_url: str | None,
+    onedrive_batch_window_seconds: int | None,
+    onedrive_access_token: str | None,
+    onedrive_refresh_token: str | None,
+    onedrive_token_expires_at_utc: str | None,
+    google_drive_client_id: str | None = None,
+    google_drive_client_secret: str | None = None,
+    google_drive_folder_id: str | None = None,
+    google_drive_batch_window_seconds: int | None = None,
+    google_drive_access_token: str | None = None,
+    google_drive_refresh_token: str | None = None,
+    google_drive_token_expires_at_utc: str | None = None,
+    allowed_user_ids: str | None = None,
+    log_level: str | None = None,
+    message_timestamp_window_seconds: int | None = None,
+    daily_brief_time_utc: str | None = None,
 ) -> dict[str, Any]:
     """Build CLI override mapping from run command arguments."""
     return {
@@ -78,6 +94,26 @@ def _build_cli_overrides(
                 "path_prefix": github_path_prefix,
                 "api_base_url": github_api_base_url,
                 "batch_window_seconds": github_batch_window_seconds,
+            },
+            "onedrive": {
+                "tenant_id": onedrive_tenant_id,
+                "client_id": onedrive_client_id,
+                "client_secret": onedrive_client_secret,
+                "root_path": onedrive_root_path,
+                "api_base_url": onedrive_api_base_url,
+                "batch_window_seconds": onedrive_batch_window_seconds,
+                "access_token": onedrive_access_token,
+                "refresh_token": onedrive_refresh_token,
+                "token_expires_at_utc": onedrive_token_expires_at_utc,
+            },
+            "google_drive": {
+                "client_id": google_drive_client_id,
+                "client_secret": google_drive_client_secret,
+                "folder_id": google_drive_folder_id,
+                "batch_window_seconds": google_drive_batch_window_seconds,
+                "access_token": google_drive_access_token,
+                "refresh_token": google_drive_refresh_token,
+                "token_expires_at_utc": google_drive_token_expires_at_utc,
             },
         },
         "allowed_user_ids": allowed_user_ids,
@@ -257,7 +293,10 @@ def run_command(
     storage_provider: str | None = typer.Option(
         None,
         "--storage-provider",
-        help="Storage provider: obsidian_vault or github_repo.",
+        help=(
+            "Storage provider: obsidian_vault, github_repo, onedrive, "
+            "or google_drive."
+        ),
     ),
     obsidian_vault_root: Path | None = typer.Option(
         None,
@@ -315,6 +354,91 @@ def run_command(
             "(default: 60)."
         ),
     ),
+    onedrive_tenant_id: str | None = typer.Option(
+        None,
+        "--onedrive-tenant-id",
+        help="Microsoft tenant ID for onedrive storage provider.",
+    ),
+    onedrive_client_id: str | None = typer.Option(
+        None,
+        "--onedrive-client-id",
+        help="Microsoft app client ID for onedrive storage provider.",
+    ),
+    onedrive_client_secret: str | None = typer.Option(
+        None,
+        "--onedrive-client-secret",
+        help="Microsoft app client secret for onedrive storage provider.",
+    ),
+    onedrive_root_path: str | None = typer.Option(
+        None,
+        "--onedrive-root-path",
+        help=(
+            "Root folder path in OneDrive for telejournal data "
+            "(for example, Apps/telejournal)."
+        ),
+    ),
+    onedrive_api_base_url: str | None = typer.Option(
+        None,
+        "--onedrive-api-base-url",
+        help="Microsoft Graph API base URL.",
+    ),
+    onedrive_batch_window_seconds: int | None = typer.Option(
+        None,
+        "--onedrive-batch-window-seconds",
+        help=(
+            "Flush pending onedrive writes in bursts every N seconds " "(default: 60)."
+        ),
+    ),
+    onedrive_access_token: str | None = typer.Option(
+        None,
+        "--onedrive-access-token",
+        help="Cached OneDrive access token.",
+    ),
+    onedrive_refresh_token: str | None = typer.Option(
+        None,
+        "--onedrive-refresh-token",
+        help="Cached OneDrive refresh token.",
+    ),
+    onedrive_token_expires_at_utc: str | None = typer.Option(
+        None,
+        "--onedrive-token-expires-at-utc",
+        help=("Access token expiry in UTC format YYYY-MM-DDTHH:MM:SSZ."),
+    ),
+    google_drive_client_id: str | None = typer.Option(
+        None,
+        "--google-drive-client-id",
+        help="Google OAuth app client ID for google_drive storage provider.",
+    ),
+    google_drive_client_secret: str | None = typer.Option(
+        None,
+        "--google-drive-client-secret",
+        help="Google OAuth app client secret for google_drive provider.",
+    ),
+    google_drive_folder_id: str | None = typer.Option(
+        None,
+        "--google-drive-folder-id",
+        help="Target Google Drive folder ID for telejournal files.",
+    ),
+    google_drive_batch_window_seconds: int | None = typer.Option(
+        None,
+        "--google-drive-batch-window-seconds",
+        help="Flush pending google_drive writes every N seconds (default: 60).",
+    ),
+    google_drive_access_token: str | None = typer.Option(
+        None,
+        "--google-drive-access-token",
+        help="Cached Google Drive access token.",
+    ),
+    google_drive_refresh_token: str | None = typer.Option(
+        None,
+        "--google-drive-refresh-token",
+        help="Cached Google Drive refresh token.",
+    ),
+    google_drive_token_expires_at_utc: str | None = typer.Option(
+        None,
+        "--google-drive-token-expires-at-utc",
+        help="Google access token expiry in UTC format YYYY-MM-DDTHH:MM:SSZ.",
+    ),
     allowed_user_ids: str | None = typer.Option(
         None,
         "--allowed-user-ids",
@@ -361,6 +485,22 @@ def run_command(
         github_path_prefix,
         github_api_base_url,
         github_batch_window_seconds,
+        onedrive_tenant_id,
+        onedrive_client_id,
+        onedrive_client_secret,
+        onedrive_root_path,
+        onedrive_api_base_url,
+        onedrive_batch_window_seconds,
+        onedrive_access_token,
+        onedrive_refresh_token,
+        onedrive_token_expires_at_utc,
+        google_drive_client_id,
+        google_drive_client_secret,
+        google_drive_folder_id,
+        google_drive_batch_window_seconds,
+        google_drive_access_token,
+        google_drive_refresh_token,
+        google_drive_token_expires_at_utc,
         allowed_user_ids,
         log_level,
         message_timestamp_window_seconds,
@@ -381,7 +521,7 @@ def run_command(
         output.info(f"Telejournal v{__version__} starting", echo=True)
         if settings.storage_provider == "obsidian_vault":
             output.info(f"Storage: obsidian_vault ({settings.vault_root})", echo=True)
-        else:
+        elif settings.storage_provider == "github_repo":
             output.info(
                 (
                     "Storage: github_repo "
@@ -392,6 +532,36 @@ def run_command(
             )
             output.info(
                 ("GitHub batch window: " f"{settings.github_batch_window_seconds}s"),
+                echo=True,
+            )
+        elif settings.storage_provider == "onedrive":
+            output.info(
+                (
+                    "Storage: onedrive "
+                    f"({settings.onedrive_root_path}, tenant={settings.onedrive_tenant_id})"
+                ),
+                echo=True,
+            )
+            output.info(
+                (
+                    "OneDrive batch window: "
+                    f"{settings.onedrive_batch_window_seconds}s"
+                ),
+                echo=True,
+            )
+        else:
+            output.info(
+                (
+                    "Storage: google_drive "
+                    f"(folder_id={settings.google_drive_folder_id or 'root'})"
+                ),
+                echo=True,
+            )
+            output.info(
+                (
+                    "Google Drive batch window: "
+                    f"{settings.google_drive_batch_window_seconds}s"
+                ),
                 echo=True,
             )
         output.info(f"Log level: {settings.log_level}", echo=True)

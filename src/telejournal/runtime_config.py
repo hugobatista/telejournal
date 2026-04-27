@@ -91,6 +91,34 @@ def _serialize_settings_for_yaml(settings: Settings) -> dict[str, Any]:
                 "batch_window_seconds": settings.github_batch_window_seconds,
             },
         }
+    elif settings.storage_provider == "onedrive":
+        storage_payload = {
+            "provider": "onedrive",
+            "onedrive": {
+                "tenant_id": settings.onedrive_tenant_id,
+                "client_id": settings.onedrive_client_id,
+                "client_secret": settings.onedrive_client_secret,
+                "root_path": settings.onedrive_root_path,
+                "api_base_url": settings.onedrive_api_base_url,
+                "batch_window_seconds": settings.onedrive_batch_window_seconds,
+                "access_token": settings.onedrive_access_token,
+                "refresh_token": settings.onedrive_refresh_token,
+                "token_expires_at_utc": settings.onedrive_token_expires_at_utc,
+            },
+        }
+    elif settings.storage_provider == "google_drive":
+        storage_payload = {
+            "provider": "google_drive",
+            "google_drive": {
+                "client_id": settings.google_drive_client_id,
+                "client_secret": settings.google_drive_client_secret,
+                "folder_id": settings.google_drive_folder_id,
+                "batch_window_seconds": settings.google_drive_batch_window_seconds,
+                "access_token": settings.google_drive_access_token,
+                "refresh_token": settings.google_drive_refresh_token,
+                "token_expires_at_utc": settings.google_drive_token_expires_at_utc,
+            },
+        }
     else:
         storage_payload = {
             "provider": "obsidian_vault",

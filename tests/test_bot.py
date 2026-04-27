@@ -20,6 +20,7 @@ from telejournal.bot import (
     CONFIG_PENDING_KEY,
     DAILY_BRIEF_JOB_NAME,
     DELETE_CALLBACK_PREFIX,
+    FLUSHED_ACK,
     HISTORY_CALLBACK_PREFIX,
     LAST_PROMPT_AT_KEY,
     LAST_WINDOW_AT_KEY,
@@ -27,6 +28,7 @@ from telejournal.bot import (
     MOOD_CALLBACK_PREFIX,
     NO_MEMORIES_MESSAGE,
     OVERRIDE_DATE_KEY,
+    QUEUED_ACK,
     STARTUP_JOB_NAME,
     STARTUP_MESSAGE,
     TAG_CALLBACK_PREFIX,
@@ -36,7 +38,13 @@ from telejournal.bot import (
     _chunk_text,
     _truncate_message,
 )
-from telejournal.config import Settings
+from telejournal.config import Settings, STORAGE_PROVIDER_ONEDRIVE
+from telejournal.storage import (
+    FlushEvent,
+    OneDriveAuthorizationRequiredError,
+    ProviderCapabilities,
+    WriteVisibility,
+)
 from telejournal.formatting import (
     TG_ENTRY_END_TOKEN,
     TG_ENTRY_START_TOKEN,
@@ -90,6 +98,7 @@ def journal_bot(tmp_path: Path) -> JournalBot:
         Settings("token", tmp_path, {1}, config_path=tmp_path / "config.yaml")
     )
     bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        capabilities=ProviderCapabilities(write_visibility=WriteVisibility.IMMEDIATE),
         vault_root=tmp_path,
         append_entry=AsyncMock(),
         delete_last_entry=AsyncMock(return_value="%% 18:34:42 %%\nhello"),
@@ -115,6 +124,23 @@ def journal_bot(tmp_path: Path) -> JournalBot:
         get_same_day_previous_year_notes=AsyncMock(return_value=[]),
     )
     return bot
+
+
+def test_init_registers_storage_flush_listener_for_buffered_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bot init should subscribe to storage flush events when supported."""
+    callbacks: list[Any] = []
+    repository = SimpleNamespace(
+        capabilities=ProviderCapabilities(write_visibility=WriteVisibility.BUFFERED),
+        add_flush_listener=lambda callback: callbacks.append(callback),
+    )
+
+    monkeypatch.setattr("telejournal.bot.build_repository", lambda _s: repository)
+    JournalBot(Settings("token", tmp_path, {1}, config_path=tmp_path / "config.yaml"))
+
+    assert len(callbacks) == 1
 
 
 def _context(
@@ -249,8 +275,35 @@ async def test_help_mood_setdate_resetdate_commands(journal_bot: JournalBot) -> 
     await journal_bot.delete_command(update, context)  # type: ignore
     await journal_bot.show_command(update, context)  # type: ignore
     await journal_bot.todayinhistory_command(update, context)  # type: ignore
+    await journal_bot.storageauth_command(update, context)  # type: ignore
 
-    assert update.effective_message.reply_text.await_count == 6
+    assert update.effective_message.reply_text.await_count == 7
+
+
+@pytest.mark.asyncio
+async def test_help_command_hides_provider_specific_commands(
+    journal_bot: JournalBot,
+) -> None:
+    """Help output should include onedrive auth only for onedrive provider."""
+    obsidian_update = _private_update()
+
+    await journal_bot.help_command(obsidian_update, _context())
+
+    obsidian_help = obsidian_update.effective_message.reply_text.await_args.args[0]
+    assert "/storageauth" not in obsidian_help
+
+    onedrive_update = _private_update()
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider=STORAGE_PROVIDER_ONEDRIVE,
+    )
+
+    await journal_bot.help_command(onedrive_update, _context())
+
+    onedrive_help = onedrive_update.effective_message.reply_text.await_args.args[0]
+    assert "/storageauth" in onedrive_help
 
 
 @pytest.mark.asyncio
@@ -387,7 +440,7 @@ async def test_entry_ack_and_initial_mood_prompt(journal_bot: JournalBot) -> Non
     replies = [
         call.args[0] for call in update.effective_message.reply_text.await_args_list
     ]
-    assert "✅ Added to journal." in replies
+    assert "Added to journal ✅" in replies
     assert "How are you feeling today?" in replies
 
 
@@ -405,7 +458,72 @@ async def test_entry_ack_without_mood_prompt_when_mood_exists(
     replies = [
         call.args[0] for call in update.effective_message.reply_text.await_args_list
     ]
-    assert replies == ["✅ Added to journal."]
+    assert replies == ["Added to journal ✅"]
+
+
+@pytest.mark.asyncio
+async def test_entry_ack_queued_for_buffered_storage(
+    journal_bot: JournalBot,
+) -> None:
+    """Buffered providers should acknowledge writes as queued."""
+    setattr(
+        journal_bot._repository,
+        "capabilities",
+        ProviderCapabilities(write_visibility=WriteVisibility.BUFFERED),
+    )
+    context = _context()
+    update = _private_update(text="hello")
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    replies = [
+        call.args[0] for call in update.effective_message.reply_text.await_args_list
+    ]
+    assert QUEUED_ACK in replies
+
+
+@pytest.mark.asyncio
+async def test_dispatch_storage_flush_notifications_notifies_pending_chats(
+    journal_bot: JournalBot,
+) -> None:
+    """Flush notifications should be sent once for chats with queued writes."""
+    context = _context()
+    journal_bot._pending_flush_chat_ids.update({1})
+    journal_bot._on_storage_flush_event(
+        FlushEvent(
+            provider="github_repo",
+            flush_cycle=1,
+            upserts=1,
+            deletes=0,
+            reason="timer",
+        )
+    )
+
+    await journal_bot.dispatch_storage_flush_notifications(context)  # type: ignore[arg-type]
+
+    context.bot.send_message.assert_awaited_once_with(1, FLUSHED_ACK)
+    assert not journal_bot._pending_flush_chat_ids
+
+
+@pytest.mark.asyncio
+async def test_dispatch_storage_flush_notifications_skips_without_pending_chats(
+    journal_bot: JournalBot,
+) -> None:
+    """Flush events without pending chat writes should not send notifications."""
+    context = _context()
+    journal_bot._on_storage_flush_event(
+        FlushEvent(
+            provider="github_repo",
+            flush_cycle=1,
+            upserts=1,
+            deletes=0,
+            reason="timer",
+        )
+    )
+
+    await journal_bot.dispatch_storage_flush_notifications(context)  # type: ignore[arg-type]
+
+    assert context.bot.send_message.await_count == 0  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -856,6 +974,10 @@ async def test_handle_error_and_auth_rejections(journal_bot: JournalBot) -> None
         update_stub = _UpdateStub()
         await journal_bot.handle_error(update_stub, context)
         assert update_stub.effective_message.reply_text.await_count == 1  # type: ignore
+
+        context.error = OneDriveAuthorizationRequiredError("OneDrive auth required")
+        await journal_bot.handle_error(update_stub, context)
+        assert update_stub.effective_message.reply_text.await_count == 2  # type: ignore
     finally:
         bot_module.Update = original_update  # type: ignore
 
@@ -878,6 +1000,23 @@ def test_keyboards_and_registration(journal_bot: JournalBot) -> None:
     journal_bot.register_handlers(app)  # type: ignore[arg-type]
     assert handlers
     assert errors
+    default_command_names = {
+        command for handler in handlers for command in getattr(handler, "commands", [])
+    }
+    assert "storageauth" not in default_command_names
+
+    handlers.clear()
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider=STORAGE_PROVIDER_ONEDRIVE,
+    )
+    journal_bot.register_handlers(app)  # type: ignore[arg-type]
+    onedrive_command_names = {
+        command for handler in handlers for command in getattr(handler, "commands", [])
+    }
+    assert "storageauth" in onedrive_command_names
 
     jq = _FakeJobQueue()
     journal_bot.register_jobs(jq)  # type: ignore[arg-type]
@@ -901,6 +1040,26 @@ async def test_edited_text_message_updates_existing_entry(
     assert journal_bot._repository.update_marked_entry.await_count == 1  # type: ignore[attr-defined]
     reply = update.effective_message.reply_text.await_args.args[0]
     assert "Edited entry updated" in reply
+
+
+@pytest.mark.asyncio
+async def test_edited_text_message_queued_for_buffered_storage(
+    journal_bot: JournalBot,
+) -> None:
+    """Edited text acknowledgments should report queued writes when buffered."""
+    setattr(
+        journal_bot._repository,
+        "capabilities",
+        ProviderCapabilities(write_visibility=WriteVisibility.BUFFERED),
+    )
+    journal_bot._repository.update_marked_entry = AsyncMock(return_value=True)  # type: ignore[attr-defined]
+    context = _context()
+    update = _private_update(text="edited text", message_id=43, edited_message=True)
+
+    await journal_bot.handle_journal_entry(update, context)
+
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "queued" in reply
 
 
 @pytest.mark.asyncio
@@ -939,7 +1098,7 @@ async def test_prompt_for_mood_respects_settings_flag(
     replies = [
         call.args[0] for call in update.effective_message.reply_text.await_args_list
     ]
-    assert replies == ["✅ Added to journal."]
+    assert replies == ["Added to journal ✅"]
 
 
 @pytest.mark.asyncio
@@ -1530,6 +1689,184 @@ async def test_send_startup_message_notifies_all_configured_chats(
     ]
     assert sent_chat_ids == [2, 5, 9]
     assert sent_messages == [STARTUP_MESSAGE, STARTUP_MESSAGE, STARTUP_MESSAGE]
+
+
+@pytest.mark.asyncio
+async def test_send_startup_message_includes_onedrive_auth_instructions(
+    journal_bot: JournalBot,
+) -> None:
+    """Startup greeting should include OneDrive auth guidance when required."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+    )
+    journal_bot._repository.build_authorization_instructions = lambda: "Run /storageauth start"  # type: ignore[attr-defined]
+    context = _context()
+
+    await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
+
+    message = context.bot.send_message.await_args.args[1]  # type: ignore[attr-defined]
+    assert "Run /storageauth start" in message
+
+
+@pytest.mark.asyncio
+async def test_send_startup_message_handles_auth_instruction_failures(
+    journal_bot: JournalBot,
+) -> None:
+    """Startup greeting should still send when auth instruction building fails."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+    )
+
+    def _raise() -> str:
+        raise RuntimeError("boom")
+
+    journal_bot._repository.build_authorization_instructions = _raise  # type: ignore[attr-defined]
+    context = _context()
+
+    await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
+
+    message = context.bot.send_message.await_args.args[1]  # type: ignore[attr-defined]
+    assert message == STARTUP_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_storageauth_command_flows(journal_bot: JournalBot) -> None:
+    """OneDrive auth command should support status, start, complete, and errors."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+    )
+    update = _private_update()
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: "status instructions",
+        start_device_authorization=lambda: "start instructions",
+        complete_device_authorization=lambda: "done",
+        is_authorized=lambda: False,
+    )
+
+    auto_context = _context(args=[])
+    await journal_bot.storageauth_command(update, auto_context)
+    assert "done" in update.effective_message.reply_text.await_args.args[0]
+
+    status_context = _context(args=["status"])
+    await journal_bot.storageauth_command(update, status_context)
+    assert (
+        "status instructions" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    start_context = _context(args=["start"])
+    await journal_bot.storageauth_command(update, start_context)
+    assert (
+        "start instructions" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    complete_context = _context(args=["complete"])
+    await journal_bot.storageauth_command(update, complete_context)
+    assert "done" in update.effective_message.reply_text.await_args.args[0]
+
+    invalid_context = _context(args=["invalid"])
+    await journal_bot.storageauth_command(update, invalid_context)
+    assert "Use /storageauth" in update.effective_message.reply_text.await_args.args[0]
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: None,
+        is_authorized=lambda: True,
+    )
+    auto_authorized_context = _context(args=[])
+    await journal_bot.storageauth_command(update, auto_authorized_context)
+    assert (
+        "already authorized" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: None,
+        is_authorized=lambda: True,
+    )
+    authorized_context = _context(args=["status"])
+    await journal_bot.storageauth_command(update, authorized_context)
+    assert (
+        "already authorized" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: (_ for _ in ()).throw(
+            RuntimeError("auth failed")
+        ),
+        start_device_authorization=lambda: "ignored",
+        complete_device_authorization=lambda: "ignored",
+        is_authorized=lambda: False,
+    )
+    failing_context = _context(args=["status"])
+    await journal_bot.storageauth_command(update, failing_context)
+    assert "auth failed" in update.effective_message.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_storageauth_command_edge_paths(journal_bot: JournalBot) -> None:
+    """OneDrive auth command should handle authorization and backend edge paths."""
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={2},
+        storage_provider="onedrive",
+    )
+    unauthorized = _private_update(user_id=1)
+    await journal_bot.storageauth_command(unauthorized, _context())
+    assert unauthorized.effective_message.reply_text.await_count == 0
+
+    missing_message = _private_update()
+    missing_message.effective_message = None
+    journal_bot._settings = Settings(
+        telegram_token="token",
+        vault_root=journal_bot._settings.vault_root,
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+    )
+    await journal_bot.storageauth_command(missing_message, _context())
+
+    update = _private_update()
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        is_authorized=lambda: False,
+    )
+    await journal_bot.storageauth_command(update, _context(args=[]))
+    assert (
+        "workflow is unavailable"
+        in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: "status",
+        is_authorized=lambda: False,
+    )
+    await journal_bot.storageauth_command(update, _context(args=[]))
+    assert "status" in update.effective_message.reply_text.await_args.args[0]
+
+    await journal_bot.storageauth_command(update, _context(args=["start"]))
+    assert (
+        "start is unavailable" in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    await journal_bot.storageauth_command(update, _context(args=["complete"]))
+    assert (
+        "completion is unavailable"
+        in update.effective_message.reply_text.await_args.args[0]
+    )
+
+    journal_bot._repository = SimpleNamespace(  # type: ignore[assignment]
+        build_authorization_instructions=lambda: None,
+        is_authorized=lambda: False,
+    )
+    await journal_bot.storageauth_command(update, _context(args=[]))
+    assert (
+        "already authorized" in update.effective_message.reply_text.await_args.args[0]
+    )
 
 
 @pytest.mark.asyncio

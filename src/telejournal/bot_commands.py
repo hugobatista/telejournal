@@ -18,6 +18,7 @@ from telejournal.bot_helpers import (
     _tags_keyboard,
     _truncate_message,
 )
+from telejournal.command_registry import visible_help_lines
 from telejournal.logic import effective_note_datetime, parse_setdate_args
 
 
@@ -66,6 +67,8 @@ class CommandHandlerService:
         if not self._is_private_and_authorized(update):
             return
 
+        command_lines = visible_help_lines(self._settings().storage_provider)
+
         help_text = (
             "📝 Telejournal Bot Usage\n\n"
             "• Every private message is journaled\n"
@@ -74,19 +77,8 @@ class CommandHandlerService:
             "• Video messages (including circular video notes) are embedded from attachments/\n"
             "• Messages within the configured time window share one timestamp\n"
             "• Mood tracked via /mood (😢 😐 😌 🙂 😊)\n\n"
-            "Commands:\n"
-            "/setdate YYYY-MM-DD [HH:MM:SS]  Set target note date/time\n"
-            "/resetdate  Return to today\n"
-            "/tags  Show tag buttons\n"
-            "/tags work kids  Add/select one or more tags\n"
-            "/mood  Open mood picker\n"
-            "/show  Show current effective day note\n"
-            "/show YYYY-MM-DD  Show a specific day note\n"
-            "/todayinhistory  Show same-day notes from previous years\n"
-            "/delete  Delete last entry and show deleted content\n"
-            "/delete day [YYYY-MM-DD]  Delete full day note\n"
-            "/settings  Guided runtime configuration\n"
-            "/help"
+            + "Commands:\n"
+            + "\n".join(command_lines)
         )
 
         if update.effective_message:
@@ -313,3 +305,83 @@ class CommandHandlerService:
             f"{self._config_summary()}\n\nChoose one setting to update:",
             reply_markup=self._config_keyboard(),
         )
+
+    async def storageauth_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Run storage device authorization steps for first-time setup."""
+        if not self._is_private_and_authorized(update):
+            return
+        if not update.effective_message:
+            return
+
+        repository = self._repository()
+        start_auth = getattr(repository, "start_device_authorization", None)
+        complete_auth = getattr(repository, "complete_device_authorization", None)
+        show_instructions = getattr(
+            repository, "build_authorization_instructions", None
+        )
+        is_authorized = getattr(repository, "is_authorized", None)
+
+        if not callable(show_instructions):
+            await update.effective_message.reply_text(
+                "Authorization workflow is unavailable for this storage backend."
+            )
+            return
+
+        action = "auto"
+        if context.args:
+            action = context.args[0].strip().lower()
+
+        try:
+            if action in {"start", "restart"}:
+                if not callable(start_auth):
+                    raise RuntimeError("OneDrive auth start is unavailable")
+                result = start_auth()
+                await update.effective_message.reply_text(result)
+                return
+
+            if action in {"complete", "poll"}:
+                if not callable(complete_auth):
+                    raise RuntimeError("OneDrive auth completion is unavailable")
+                result = complete_auth()
+                await update.effective_message.reply_text(result)
+                return
+
+            if action in {"auto", ""}:
+                if callable(is_authorized) and bool(is_authorized()):
+                    await update.effective_message.reply_text(
+                        "Storage backend is already authorized."
+                    )
+                    return
+
+                if callable(complete_auth):
+                    result = complete_auth()
+                    await update.effective_message.reply_text(result)
+                    return
+
+                action = "status"
+
+            if action != "status":
+                await update.effective_message.reply_text(
+                    "Use /storageauth [start|complete|status]"
+                )
+                return
+
+            if callable(is_authorized) and bool(is_authorized()):
+                await update.effective_message.reply_text(
+                    "Storage backend is already authorized."
+                )
+                return
+
+            instructions = show_instructions()
+            if instructions is None:
+                await update.effective_message.reply_text(
+                    "Storage backend is already authorized."
+                )
+                return
+            await update.effective_message.reply_text(instructions)
+        except RuntimeError as exc:
+            await update.effective_message.reply_text(str(exc))

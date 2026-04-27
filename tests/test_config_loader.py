@@ -102,3 +102,38 @@ def test_load_env_config_github_provider(monkeypatch: pytest.MonkeyPatch) -> Non
     assert config["storage"]["github_repo"]["path_prefix"] == "notes"
     assert config["storage"]["github_repo"]["api_base_url"] == "https://api.github.com"
     assert config["storage"]["github_repo"]["batch_window_seconds"] == "90"
+
+
+def test_load_env_config_onedrive_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OneDrive storage env variables should map to nested config keys."""
+    monkeypatch.setenv("STORAGE_PROVIDER", "onedrive")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_TENANT_ID", "common")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ROOT_PATH", "Apps/telejournal")
+    monkeypatch.setenv(
+        "STORAGE_ONEDRIVE_API_BASE_URL",
+        "https://graph.microsoft.com/v1.0",
+    )
+    monkeypatch.setenv("STORAGE_ONEDRIVE_BATCH_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_ACCESS_TOKEN", "access")
+    monkeypatch.setenv("STORAGE_ONEDRIVE_REFRESH_TOKEN", "refresh")
+    monkeypatch.setenv(
+        "STORAGE_ONEDRIVE_TOKEN_EXPIRES_AT_UTC",
+        "2026-03-28T10:00:00Z",
+    )
+
+    config = load_env_config()
+
+    assert config["storage"]["provider"] == "onedrive"
+    assert config["storage"]["onedrive"]["tenant_id"] == "common"
+    assert config["storage"]["onedrive"]["client_id"] == "client-id"
+    assert config["storage"]["onedrive"]["client_secret"] == "client-secret"
+    assert config["storage"]["onedrive"]["root_path"] == "Apps/telejournal"
+    assert (
+        config["storage"]["onedrive"]["api_base_url"]
+        == "https://graph.microsoft.com/v1.0"
+    )
+    assert config["storage"]["onedrive"]["batch_window_seconds"] == "60"
+    assert config["storage"]["onedrive"]["access_token"] == "access"
+    assert config["storage"]["onedrive"]["refresh_token"] == "refresh"

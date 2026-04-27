@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,9 +18,15 @@ import yaml
 from telejournal.formatting import marker_end_comment, marker_start_comment
 from telejournal.config import Settings
 from telejournal.storage import (
+    FlushEvent,
     GitHubRepository,
+    GoogleDriveRepository,
     NoteData,
+    OneDriveAuthorizationRequiredError,
+    OneDriveRepository,
+    ProviderCapabilities,
     VaultRepository,
+    WriteVisibility,
     build_repository,
 )
 
@@ -49,7 +56,7 @@ async def test_append_entry_creates_note_with_today_defaults(tmp_path: Path) -> 
     repo = VaultRepository(tmp_path)
     note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
     # Mock datetime.now to return a datetime on the same date as note_dt
-    with patch("telejournal.storage.datetime") as mock_dt:
+    with patch("telejournal.storage.obsidian.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 3, 7, 12, 0, 0, tzinfo=UTC)
         mock_dt.combine = datetime.combine
         mock_dt.min.time = datetime.min.time
@@ -598,6 +605,88 @@ def test_build_repository_rejects_incomplete_github_settings() -> None:
         build_repository(settings)
 
 
+def test_build_repository_onedrive_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Factory should build OneDrive repository for onedrive settings."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_client_id="client-id",
+        onedrive_client_secret="client-secret",
+        onedrive_root_path="Apps/telejournal",
+    )
+
+    repo = build_repository(settings)
+    assert isinstance(repo, OneDriveRepository)
+
+
+def test_build_repository_rejects_incomplete_onedrive_settings() -> None:
+    """Factory should reject incomplete onedrive provider configuration."""
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_client_id=None,
+        onedrive_client_secret="client-secret",
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        build_repository(settings)
+
+
+def test_build_repository_rejects_missing_onedrive_client_secret() -> None:
+    """Factory should reject onedrive provider when client secret is missing."""
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="onedrive",
+        onedrive_client_id="client-id",
+        onedrive_client_secret=None,
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        build_repository(settings)
+
+
+def test_build_repository_google_drive_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Factory should build Google Drive repository for google_drive settings."""
+    monkeypatch.setattr(
+        GoogleDriveRepository,
+        "_initialize_auth_state",
+        lambda _s: None,
+    )
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="google_drive",
+        google_drive_client_id="client-id",
+        google_drive_client_secret="client-secret",
+        google_drive_folder_id="folder-id",
+    )
+
+    repo = build_repository(settings)
+    assert isinstance(repo, GoogleDriveRepository)
+
+
+def test_build_repository_rejects_incomplete_google_drive_settings() -> None:
+    """Factory should reject incomplete google drive provider configuration."""
+    settings = Settings(
+        telegram_token="token",
+        vault_root=Path("."),
+        allowed_user_ids={1},
+        storage_provider="google_drive",
+        google_drive_client_id="client-id",
+        google_drive_client_secret=None,
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        build_repository(settings)
+
+
 def test_build_repository_rejects_unknown_provider(tmp_path: Path) -> None:
     """Factory should reject unsupported providers."""
     settings = Settings(
@@ -629,7 +718,7 @@ def test_github_repository_warns_on_public_repo(
 
     monkeypatch.setattr(GitHubRepository, "_request_json", _fake_request)
     monkeypatch.setattr(
-        "telejournal.storage.LOGGER.warning",
+        "telejournal.storage.github.LOGGER.warning",
         lambda message, *args: warnings.append(message % args),
     )
     GitHubRepository("acme", "journal", "token")
@@ -655,7 +744,7 @@ def test_github_repository_warns_when_visibility_check_fails(
 
     monkeypatch.setattr(GitHubRepository, "_request_json", _raise_request)
     monkeypatch.setattr(
-        "telejournal.storage.LOGGER.warning",
+        "telejournal.storage.github.LOGGER.warning",
         lambda message, *args: warnings.append(message % args),
     )
     GitHubRepository("acme", "journal", "token")
@@ -680,7 +769,7 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             return b'{"ok": true}'
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen", lambda *_a, **_k: _Resp()
+        "telejournal.storage.github.urllib_request.urlopen", lambda *_a, **_k: _Resp()
     )
     payload = repo._request_json("GET", "/x")
     assert payload == {"ok": True}
@@ -693,7 +782,7 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=None,
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_404),
     )
     assert repo._request_json("GET", "/x", allow_not_found=True) is None
@@ -706,14 +795,14 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=None,
     )
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(http_500),
     )
     with pytest.raises(RuntimeError, match="GitHub API request failed"):
         repo._request_json("GET", "/x")
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(OSError("down")),
     )
     with pytest.raises(RuntimeError, match="GitHub API request failed"):
@@ -939,12 +1028,12 @@ async def test_github_repository_remaining_branches(
             return b""
 
     monkeypatch.setattr(
-        "telejournal.storage.urllib_request.urlopen",
+        "telejournal.storage.github.urllib_request.urlopen",
         lambda *_a, **_k: _EmptyResp(),
     )
     assert repo._request_json("PUT", "/x", payload={"a": 1}) is None
 
-    with patch("telejournal.storage.datetime") as mock_dt:
+    with patch("telejournal.storage.github.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 3, 7, 12, 0, 0, tzinfo=UTC)
         mock_dt.combine = datetime.combine
         mock_dt.min.time = datetime.min.time
@@ -1168,6 +1257,122 @@ async def test_github_repository_batch_retry_and_delete_queue(
 
 
 @pytest.mark.asyncio
+async def test_github_repository_emits_flush_event_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful batched flushes should emit one provider flush event."""
+    monkeypatch.setattr(
+        GitHubRepository,
+        "_warn_if_repository_is_public",
+        lambda _s: None,
+    )
+    repo = GitHubRepository("acme", "journal", "token")
+    monkeypatch.setattr(repo, "_ensure_flush_task", lambda: None)
+
+    monkeypatch.setattr(repo, "_get_content", lambda _p: {"sha": "sha-1"})
+    monkeypatch.setattr(repo, "_put_content", lambda *_a, **_k: None)
+
+    events: list[FlushEvent] = []
+    repo.add_flush_listener(events.append)
+
+    await repo._queue_put_content("2026/2026-03-07.md", b"hello", "update")
+    await repo.flush_pending(reason="test")
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.provider == "github_repo"
+    assert event.reason == "test"
+    assert event.upserts == 1
+
+
+def test_storage_provider_capabilities_are_explicit() -> None:
+    """Providers should declare write visibility explicitly via capabilities."""
+    assert isinstance(VaultRepository.capabilities, ProviderCapabilities)
+    assert VaultRepository.capabilities.write_visibility == WriteVisibility.IMMEDIATE
+
+    assert isinstance(GitHubRepository.capabilities, ProviderCapabilities)
+    assert GitHubRepository.capabilities.write_visibility == WriteVisibility.BUFFERED
+
+    assert isinstance(OneDriveRepository.capabilities, ProviderCapabilities)
+    assert OneDriveRepository.capabilities.write_visibility == WriteVisibility.BUFFERED
+
+    assert isinstance(GoogleDriveRepository.capabilities, ProviderCapabilities)
+    assert (
+        GoogleDriveRepository.capabilities.write_visibility == WriteVisibility.BUFFERED
+    )
+
+
+def test_flush_event_publisher_deduplicates_listener_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registering the same listener twice should only notify it once."""
+    monkeypatch.setattr(
+        GitHubRepository,
+        "_warn_if_repository_is_public",
+        lambda _s: None,
+    )
+    repo = GitHubRepository("acme", "journal", "token")
+
+    seen: list[FlushEvent] = []
+    repo.add_flush_listener(seen.append)
+    repo.add_flush_listener(seen.append)
+
+    repo._emit_flush_event(
+        FlushEvent(
+            provider="github_repo",
+            flush_cycle=1,
+            upserts=1,
+            deletes=0,
+            reason="test",
+        )
+    )
+
+    assert len(seen) == 1
+
+
+def test_flush_event_publisher_handles_listener_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Listener failures should be logged and should not stop next listeners."""
+    monkeypatch.setattr(
+        GitHubRepository,
+        "_warn_if_repository_is_public",
+        lambda _s: None,
+    )
+    repo = GitHubRepository("acme", "journal", "token")
+
+    logged: list[str] = []
+    monkeypatch.setattr(
+        "telejournal.storage.common.LOGGER.exception",
+        lambda message: logged.append(message),
+    )
+
+    seen: list[str] = []
+
+    def _failing_listener(_event: FlushEvent) -> None:
+        raise RuntimeError("boom")
+
+    def _ok_listener(_event: FlushEvent) -> None:
+        seen.append("ok")
+
+    repo.add_flush_listener(_failing_listener)
+    repo.add_flush_listener(_ok_listener)
+
+    repo._emit_flush_event(
+        FlushEvent(
+            provider="github_repo",
+            flush_cycle=1,
+            upserts=1,
+            deletes=0,
+            reason="test",
+        )
+    )
+
+    assert seen == ["ok"]
+    assert logged
+
+
+@pytest.mark.asyncio
 async def test_github_repository_flush_loop_starts_once_and_handles_cancel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1193,7 +1398,7 @@ async def test_github_repository_flush_loop_starts_once_and_handles_cancel(
         started.append(task)  # type: ignore[arg-type]
         return task  # type: ignore[return-value]
 
-    monkeypatch.setattr("telejournal.storage.asyncio.create_task", _create_task)
+    monkeypatch.setattr("telejournal.storage.github.asyncio.create_task", _create_task)
     repo._ensure_flush_task()
     repo._ensure_flush_task()
     assert len(started) == 1
@@ -1208,7 +1413,7 @@ async def test_github_repository_flush_loop_starts_once_and_handles_cancel(
         return None
 
     monkeypatch.setattr(repo, "flush_pending", _flush_pending)
-    monkeypatch.setattr("telejournal.storage.asyncio.sleep", _sleep)
+    monkeypatch.setattr("telejournal.storage.github.asyncio.sleep", _sleep)
 
     with pytest.raises(asyncio.CancelledError):
         await repo._flush_loop()
@@ -1252,7 +1457,7 @@ async def test_github_repository_queue_edge_branches(
         return None
 
     monkeypatch.setattr(repo, "flush_pending", _flush_pending)
-    monkeypatch.setattr("telejournal.storage.asyncio.sleep", _sleep)
+    monkeypatch.setattr("telejournal.storage.github.asyncio.sleep", _sleep)
     with pytest.raises(asyncio.CancelledError):
         await repo._flush_loop()
 
@@ -1321,3 +1526,476 @@ async def test_github_repository_flush_requeues_delete_when_no_pending_put(
     await repo.flush_pending(reason="test")
 
     assert "2026/2026-03-10.md" in repo._pending_deletes
+
+
+def test_onedrive_auth_workflow_and_token_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """OneDrive auth flow should guide first-run setup and persist tokens."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("storage:\n  provider: onedrive\n", encoding="utf-8")
+
+    initial_device_payload = {
+        "device_code": "device-1",
+        "user_code": "ABCD-EFGH",
+        "verification_uri": "https://microsoft.com/devicelogin",
+        "verification_uri_complete": "https://microsoft.com/devicelogin?x=1",
+        "expires_in": 900,
+    }
+
+    monkeypatch.setattr(
+        OneDriveRepository,
+        "_request_device_code",
+        lambda _self: dict(initial_device_payload),
+    )
+
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+        config_path=config_path,
+    )
+
+    status = repo.build_authorization_instructions()
+    assert status is not None
+    assert "ABCD-EFGH" in status
+    assert "/storageauth complete" in status
+
+    poll_results = [
+        {"error": "authorization_pending"},
+        {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        },
+    ]
+
+    def _poll_once(_payload: dict[str, str]) -> dict[str, Any]:
+        return poll_results.pop(0)
+
+    monkeypatch.setattr(repo, "_request_form_token", _poll_once)
+
+    pending = repo.complete_device_authorization()
+    assert "still pending" in pending
+
+    success = repo.complete_device_authorization()
+    assert "completed successfully" in success
+    assert repo.is_authorized()
+    assert repo.build_authorization_instructions() is None
+
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert persisted["storage"]["onedrive"]["client_secret"] == "client-secret"
+    assert persisted["storage"]["onedrive"]["access_token"] == "new-access"
+    assert persisted["storage"]["onedrive"]["refresh_token"] == "new-refresh"
+
+
+def test_onedrive_auth_error_and_refresh_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auth helpers should raise actionable guidance when refresh cannot be used."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+
+    device_payload = {
+        "device_code": "device-2",
+        "user_code": "ZZZZ-1111",
+        "verification_uri": "https://microsoft.com/devicelogin",
+        "expires_in": 900,
+    }
+    monkeypatch.setattr(repo, "_request_device_code", lambda: dict(device_payload))
+    repo._refresh_token = "refresh"
+    monkeypatch.setattr(
+        repo,
+        "_refresh_access_token",
+        lambda: (_ for _ in ()).throw(RuntimeError("expired refresh")),
+    )
+
+    with pytest.raises(OneDriveAuthorizationRequiredError, match="ZZZZ-1111"):
+        repo._ensure_auth_for_request()
+
+    repo._device_code_payload = dict(device_payload)
+    repo._device_code_expires_at = datetime.now(UTC)
+    refreshed = repo.start_device_authorization()
+    assert "OneDrive authorization is required" in refreshed
+
+
+def test_onedrive_request_form_token_http_error_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Token helper should parse OAuth JSON errors from HTTP failures."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+
+    http_json_error = urllib_error.HTTPError(
+        url="https://x",
+        code=400,
+        msg="bad",
+        hdrs=None,
+        fp=io.BytesIO(b'{"error":"authorization_pending"}'),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_json_error),
+    )
+    payload = repo._request_form_token({"x": "y"})
+    assert payload["error"] == "authorization_pending"
+
+    http_non_json = urllib_error.HTTPError(
+        url="https://x",
+        code=500,
+        msg="boom",
+        hdrs=None,
+        fp=io.BytesIO(b"server error"),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_non_json),
+    )
+    with pytest.raises(RuntimeError, match="token request failed"):
+        repo._request_form_token({"x": "y"})
+
+
+@pytest.mark.asyncio
+async def test_onedrive_repository_note_and_media_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive repository should support note CRUD, history, and media paths."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+    monkeypatch.setattr(repo, "_ensure_flush_task", lambda: None)
+
+    note_dt = datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    files: dict[str, bytes] = {}
+    folders: set[str] = {"Apps", "Apps/telejournal", "Apps/telejournal/2025"}
+
+    def _get_item(repo_path: str) -> dict[str, Any] | None:
+        if repo_path in folders:
+            return {"name": repo_path.rsplit("/", maxsplit=1)[-1], "folder": {}}
+        if repo_path in files:
+            return {
+                "name": repo_path.rsplit("/", maxsplit=1)[-1],
+                "eTag": "etag-1",
+            }
+        return None
+
+    def _get_content(repo_path: str) -> bytes | None:
+        return files.get(repo_path)
+
+    def _put_content(repo_path: str, payload: bytes) -> None:
+        parent = "/".join(repo_path.split("/")[:-1]).strip("/")
+        if parent:
+            folders.add(parent)
+        files[repo_path] = payload
+
+    def _delete_content(repo_path: str) -> bool:
+        files.pop(repo_path, None)
+        return True
+
+    monkeypatch.setattr(repo, "_get_item", _get_item)
+    monkeypatch.setattr(repo, "_get_content", _get_content)
+    monkeypatch.setattr(repo, "_put_content", _put_content)
+    monkeypatch.setattr(repo, "_delete_content", _delete_content)
+
+    note_path = repo._repo_path(repo._note_relpath(note_dt))
+
+    await repo.append_entry(note_dt, "%% 18:34:42 %%\nhello")
+    assert note_path not in files
+
+    fm = await repo.get_note_frontmatter(note_dt)
+    assert fm["tags"] == ["journal"]
+
+    await repo.flush_pending(reason="test")
+    assert note_path in files
+
+    content = await repo.get_note_content(note_dt)
+    assert content is not None
+    assert "hello" in content
+
+    await repo.update_frontmatter(note_dt, {"mood": 5})
+    assert await repo.note_has_mood(note_dt)
+    assert await repo.note_has_entry(note_dt)
+
+    marker = "1:10"
+    await repo.append_entry(
+        note_dt,
+        "\n".join(
+            [
+                "%% 18:34:42 %%",
+                marker_start_comment(marker),
+                "old text",
+                marker_end_comment(marker),
+            ]
+        ),
+    )
+    updated = await repo.update_marked_entry(note_dt, marker, "new text")
+    assert updated
+    assert not await repo.update_marked_entry(note_dt, "missing", "new")
+
+    await repo.append_entry(note_dt, "%% 18:35:00 %%\nsecond")
+    assert await repo.peek_last_entry(note_dt) == "%% 18:35:00 %%\nsecond"
+    removed = await repo.delete_last_entry(note_dt)
+    assert removed == "%% 18:35:00 %%\nsecond"
+
+    last_time = await repo.get_last_entry_time(note_dt)
+    assert last_time == datetime(2026, 3, 7, 18, 34, 42, tzinfo=UTC)
+
+    previous_dt = datetime(2025, 3, 7, 1, 0, 0, tzinfo=UTC)
+    previous_path = repo._repo_path(repo._note_relpath(previous_dt))
+    files[previous_path] = b"---\nmood: null\n---\n\nfrom history\n"
+
+    monkeypatch.setattr(
+        repo,
+        "_list_children",
+        lambda _root: [{"folder": {}, "name": "2025"}],
+    )
+    history = await repo.get_same_day_previous_year_notes(note_dt)
+    assert [item[0].year for item in history] == [2025]
+
+    assert await repo.delete_day(note_dt)
+    assert not await repo.delete_day(note_dt)
+
+    photo_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"p"))
+    photo = SimpleNamespace(get_file=AsyncMock(return_value=photo_file))
+    voice_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"v"))
+    voice = SimpleNamespace(get_file=AsyncMock(return_value=voice_file))
+    video_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"m"))
+    video = SimpleNamespace(get_file=AsyncMock(return_value=video_file))
+    note_file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=b"n"))
+    video_note = SimpleNamespace(get_file=AsyncMock(return_value=note_file))
+
+    await repo.save_photo(photo, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.save_voice(voice, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.save_video(video, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.save_video_note(video_note, note_dt, "20260307_183442")  # type: ignore[arg-type]
+    await repo.flush_pending(reason="media")
+
+    attachment = await repo.get_attachment_bytes("2026/attachments/20260307_183442.jpg")
+    assert attachment == b"p"
+
+
+def test_onedrive_request_helpers_and_path_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OneDrive low-level request and path helpers should handle edge cases."""
+    monkeypatch.setattr(OneDriveRepository, "_initialize_auth_state", lambda _s: None)
+    repo = OneDriveRepository(
+        tenant_id="common",
+        client_id="client-id",
+        client_secret="client-secret",
+        root_path="Apps/telejournal",
+    )
+    monkeypatch.setattr(
+        repo,
+        "_build_headers",
+        lambda **_k: {"Authorization": "x"},
+    )
+
+    class _JsonResp:
+        def __enter__(self) -> "_JsonResp":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"ok": true}'
+
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: _JsonResp(),
+    )
+    assert repo._request_json("GET", "/x") == {"ok": True}
+
+    class _EmptyResp:
+        def __enter__(self) -> "_EmptyResp":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b""
+
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: _EmptyResp(),
+    )
+    assert repo._request_json("GET", "/x") is None
+
+    http_404 = urllib_error.HTTPError(
+        url="http://x",
+        code=404,
+        msg="not found",
+        hdrs=None,
+        fp=None,
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_404),
+    )
+    http_logs: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        repo,
+        "_log_graph_http_error",
+        lambda **kwargs: http_logs.append(kwargs),
+    )
+    assert repo._request_json("GET", "/x", allow_not_found=True) is None
+    assert http_logs == []
+    with pytest.raises(RuntimeError, match="OneDrive API request failed"):
+        repo._request_json("GET", "/x")
+    assert len(http_logs) == 1
+
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("down")),
+    )
+    with pytest.raises(RuntimeError, match="OneDrive API request failed"):
+        repo._request_json("GET", "/x")
+
+    class _BytesResp:
+        def __enter__(self) -> "_BytesResp":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"raw"
+
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: _BytesResp(),
+    )
+    assert repo._request_bytes("GET", "/x") == b"raw"
+
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_404),
+    )
+    http_logs.clear()
+    assert repo._request_bytes("GET", "/x", allow_not_found=True) is None
+    assert http_logs == []
+
+    http_401 = urllib_error.HTTPError(
+        url="http://x",
+        code=401,
+        msg="unauthorized",
+        hdrs=None,
+        fp=io.BytesIO(b'{"error":{"code":"unauthenticated","message":"bad"}}'),
+    )
+    monkeypatch.setattr(
+        repo,
+        "_try_refresh_after_unauthorized",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        repo,
+        "_authorization_required_error",
+        lambda: OneDriveAuthorizationRequiredError("auth required"),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_401),
+    )
+    with pytest.raises(OneDriveAuthorizationRequiredError):
+        repo._request_bytes("GET", "/x")
+
+    http_302 = urllib_error.HTTPError(
+        url="http://x",
+        code=302,
+        msg="redirect",
+        hdrs={"Location": "https://download.example/file"},
+        fp=None,
+    )
+
+    class _RedirectOpener:
+        def open(self, *_a: object, **_k: object) -> Any:
+            return (_ for _ in ()).throw(http_302)
+
+    graph_log_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "telejournal.storage.onedrive.urllib_request.build_opener",
+        lambda *_a, **_k: _RedirectOpener(),
+    )
+    monkeypatch.setattr(repo, "_request_download_bytes", lambda _u: b"redirected")
+    monkeypatch.setattr(
+        repo,
+        "_log_graph_http_error",
+        lambda **kwargs: graph_log_calls.append(kwargs),
+    )
+    assert repo._request_content_via_redirect("/x") == b"redirected"
+    assert graph_log_calls == []
+
+    monkeypatch.setattr(repo, "_request_json", lambda *_a, **_k: {"id": "1"})
+    monkeypatch.setattr(repo, "_request_content_via_redirect", lambda _e: b"via302")
+    assert repo._get_content("a/b.md") == b"via302"
+
+    assert repo._path_endpoint("", content=False) == "/me/drive/root"
+    assert repo._path_endpoint("a/b", content=True) == "/me/drive/root:/a/b:/content"
+    assert repo._children_endpoint("") == "/me/drive/root/children"
+    assert repo._children_endpoint("a/b") == "/me/drive/root:/a/b:/children"
+
+
+def test_google_drive_optional_404_paths_log_only_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Google Drive allow_not_found probes should not escalate to warnings."""
+    monkeypatch.setattr(
+        GoogleDriveRepository, "_initialize_auth_state", lambda _s: None
+    )
+    repo = GoogleDriveRepository(
+        client_id="client-id",
+        client_secret="client-secret",
+        folder_id="folder-id",
+    )
+    monkeypatch.setattr(
+        repo,
+        "_build_headers",
+        lambda **_k: {"Authorization": "x"},
+    )
+
+    debug_logs: list[str] = []
+    warning_logs: list[str] = []
+    monkeypatch.setattr(
+        "telejournal.storage.google_drive.LOGGER.debug",
+        lambda message, *args: debug_logs.append(message % args),
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.google_drive.LOGGER.warning",
+        lambda message, *args: warning_logs.append(message % args),
+    )
+
+    http_404 = urllib_error.HTTPError(
+        url="http://x",
+        code=404,
+        msg="not found",
+        hdrs=None,
+        fp=None,
+    )
+    monkeypatch.setattr(
+        "telejournal.storage.google_drive.urllib_request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(http_404),
+    )
+
+    assert repo._request_json("GET", "/x", allow_not_found=True) is None
+    assert repo._request_bytes("GET", "/x", allow_not_found=True) is None
+    assert len(debug_logs) == 2
+    assert warning_logs == []

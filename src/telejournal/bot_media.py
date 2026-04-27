@@ -134,35 +134,38 @@ class MediaEntryService:
         )
         return True
 
-    async def flush_album_entry(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def flush_album_entry(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> int | None:
         """Flush a buffered album to a single note entry."""
         job: Job[Any] | None = context.job
         if job is None or not isinstance(job.data, dict):
-            return
+            return None
 
         chat_id = job.data.get("chat_id")
         media_group_id = job.data.get("media_group_id")
         if chat_id is None or media_group_id is None:
-            return
+            return None
 
         chat_data = context.application.chat_data.get(chat_id)
         if not isinstance(chat_data, dict):
-            return
+            return None
 
         albums = chat_data.get(self._albums_key)
         if not isinstance(albums, dict):
-            return
+            return None
 
         album_state = albums.pop(media_group_id, None)
         if not isinstance(album_state, dict):
-            return
+            return None
 
         note_dt = album_state.get("note_dt")
         images = album_state.get("images") or []
         caption = album_state.get("caption") or ""
         quote = album_state.get("quote")
         if not isinstance(note_dt, datetime) or not images:
-            return
+            return None
 
         heading = format_album_entry(caption, images, "Photo album")
 
@@ -178,12 +181,13 @@ class MediaEntryService:
                 entry,
                 as_continuation=not include_timestamp,
             )
-            await context.bot.send_message(chat_id, "✅ Added to journal.")
+            return int(chat_id)
         except OSError:
             self._logger.exception(
                 "Vault write failed while flushing album for chat_id=%s",
                 chat_id,
             )
+        return None
 
     async def handle_location(
         self,
