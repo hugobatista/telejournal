@@ -1,6 +1,6 @@
 [project]
 name = "telejournal"
-version = "0.1.0"
+version = "0.1.1"
 description = "Telegram bot that journals private messages into an Obsidian vault"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,6 +10,9 @@ dependencies = [
     "typer>=0.12",
     "PyYAML>=6.0",
     "aiofiles>=24.0",
+]
+authors = [
+    { name = "Hugo Batista <code at hugobatista.com>" },
 ]
 
 [project.optional-dependencies]
