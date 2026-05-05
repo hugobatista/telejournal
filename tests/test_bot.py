@@ -594,12 +594,12 @@ async def test_show_callback_sends_embedded_attachment(
     tmp_path: Path,
 ) -> None:
     """Show callback in rendered mode should send embedded media files."""
-    attachment = tmp_path / "2026" / "attachments" / "pic.jpg"
+    attachment = tmp_path / "2026" / "resources" / "pic.jpg"
     attachment.parent.mkdir(parents=True, exist_ok=True)
     attachment.write_bytes(b"jpeg-bytes")
 
     journal_bot._repository.get_note_content = AsyncMock(  # type: ignore[attr-defined]
-        return_value="Header\n![[2026/attachments/pic.jpg]]\nFooter"
+        return_value="Header\n![[resources/pic.jpg]]\nFooter"
     )
     context = _context()
     update = _private_update(
@@ -609,8 +609,9 @@ async def test_show_callback_sends_embedded_attachment(
     await journal_bot.callback_router(update, context)
 
     assert update.callback_query.edit_message_text.await_count == 1
-    assert context.bot.send_message.await_count == 2  # type: ignore[attr-defined]
     assert context.bot.send_photo.await_count == 1  # type: ignore[attr-defined]
+    sent_messages = [call.args[1] for call in context.bot.send_message.await_args_list]  # type: ignore[attr-defined]
+    assert not any("Attachment not found" in message for message in sent_messages)
 
 
 @pytest.mark.asyncio

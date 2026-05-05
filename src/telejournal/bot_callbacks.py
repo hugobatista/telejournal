@@ -292,9 +292,19 @@ class CallbackRouterService:
 
             await query.edit_message_text("Sending note...")
             if render_mode == "raw":
-                await self._send_note_text_only(chat_id, context.bot, note_content)
+                await self._send_note_text_only(
+                    chat_id,
+                    context.bot,
+                    note_content,
+                    source_note_dt=target_dt,
+                )
             else:
-                await self._send_note_content(chat_id, context.bot, note_content)
+                await self._send_note_content(
+                    chat_id,
+                    context.bot,
+                    note_content,
+                    source_note_dt=target_dt,
+                )
             return
 
         await query.edit_message_text("Sending memories...")
