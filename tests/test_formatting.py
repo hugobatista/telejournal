@@ -263,6 +263,20 @@ def test_parse_note_render_payload_strips_alias_and_heading() -> None:
     )
 
 
+def test_parse_note_render_payload_supports_markdown_image_links() -> None:
+    """Parser should extract Markdown image links as attachment chunks."""
+    payload = parse_note_render_payload(
+        'before\n![attachment](<2026/resources/20260505_161408.jpg> "preview")\nafter'
+    )
+    assert payload == NoteRenderPayload(
+        chunks=[
+            TextChunk(text="before\n"),
+            AttachmentChunk(attachment_rel="2026/resources/20260505_161408.jpg"),
+            TextChunk(text="\nafter"),
+        ]
+    )
+
+
 def test_strip_internal_tracking_markers() -> None:
     """Internal Telegram marker comments should be removed from note text."""
     marker = "6733378829:969"

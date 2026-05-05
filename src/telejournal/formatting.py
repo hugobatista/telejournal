@@ -20,7 +20,9 @@ MOOD_LABELS = {
 TG_ENTRY_START_TOKEN = "tg-entry-start"
 TG_ENTRY_END_TOKEN = "tg-entry-end"
 
-_EMBED_RE = re.compile(r"!\[\[(?P<target>[^\]]+)\]\]")
+_ATTACHMENT_RE = re.compile(
+    r"!\[\[(?P<target>[^\]]+)\]\]|!\[[^\]]*\]\((?P<md_target>[^)]+)\)"
+)
 _INTERNAL_TG_ENTRY_MARKER_RE = re.compile(
     rf"(?m)^<!-- (?:{TG_ENTRY_START_TOKEN}|{TG_ENTRY_END_TOKEN}):[^>]+ -->\n?"
 )
@@ -59,15 +61,33 @@ def parse_note_render_payload(note_content: str) -> NoteRenderPayload:
     chunks: list[TextChunk | AttachmentChunk] = []
     cursor = 0
 
-    for match in _EMBED_RE.finditer(formatted_content):
+    for match in _ATTACHMENT_RE.finditer(formatted_content):
         before = formatted_content[cursor : match.start()]
         if before:
             chunks.append(TextChunk(text=before))
+        target = match.group("target")
+        md_target = match.group("md_target")
+        attachment_rel = None
 
-        target = match.group("target").strip()
-        # Keep first path component before Obsidian alias/heading fragments.
-        attachment_rel = target.split("|", maxsplit=1)[0]
-        attachment_rel = attachment_rel.split("#", maxsplit=1)[0].strip()
+        if target:
+            attachment_rel = target.strip()
+        elif md_target:
+            md_target = md_target.strip()
+            # Markdown image syntax can include a title after the URL
+            # e.g. (path "title"). Take the first token as the path
+            # and strip surrounding angle brackets or quotes.
+            first = md_target.split(None, 1)[0]
+            first = first.strip()
+            if (first.startswith("<") and first.endswith(">")) or (
+                first.startswith('"') and first.endswith('"')
+            ):
+                first = first[1:-1]
+            attachment_rel = first
+
+        if attachment_rel:
+            # Keep first path component before Obsidian alias/heading fragments.
+            attachment_rel = attachment_rel.split("|", maxsplit=1)[0]
+            attachment_rel = attachment_rel.split("#", maxsplit=1)[0].strip()
         if attachment_rel:
             chunks.append(AttachmentChunk(attachment_rel=attachment_rel))
 
