@@ -3,7 +3,7 @@ FROM python:3.13-slim
 # Links Docker image with repository
 LABEL org.opencontainers.image.source=https://go.hugobatista.com/gh/telejournal
 LABEL security.scan="true"
-LABEL maintainer="Hugo Batista <mail@hugobatista.com>"
+LABEL maintainer="Hugo Batista <code at hugobatista.com>"
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
