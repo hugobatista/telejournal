@@ -143,8 +143,14 @@ class JournalBot:
             ),
             config_confirm_keyboard=lambda: self._config_confirm_keyboard(),
             chat_id_resolver=lambda update: self._chat_id(update),
-            send_note_text_only=lambda *args: self._send_note_text_only(*args),
-            send_note_content=lambda *args: self._send_note_content(*args),
+            send_note_text_only=lambda *args, **kwargs: self._send_note_text_only(
+                *args,
+                **kwargs,
+            ),
+            send_note_content=lambda *args, **kwargs: self._send_note_content(
+                *args,
+                **kwargs,
+            ),
             send_historical_notes_for_chat=lambda *args: self._send_historical_notes_for_chat(
                 *args
             ),

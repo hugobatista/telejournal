@@ -45,17 +45,36 @@ class NoteDeliveryService:
         """Return the current repository instance from provider."""
         return self._repository_provider()
 
-    def resolve_attachment_path(self, attachment_rel: str) -> Path | None:
-        """Resolve a relative attachment path under vault root safely."""
+    def resolve_attachment_path(
+        self,
+        attachment_rel: str,
+        source_note_dt: datetime | None = None,
+    ) -> Path | None:
+        """Resolve a relative attachment path under the note directory or vault root."""
         repository = self._repository()
         vault_root = Path(repository.vault_root).resolve()
-        candidate = (vault_root / attachment_rel).resolve()
 
-        if candidate != vault_root and vault_root not in candidate.parents:
-            return None
-        if not candidate.exists() or not candidate.is_file():
-            return None
-        return candidate
+        candidate_roots: list[Path] = []
+        if source_note_dt is not None:
+            get_note_path = getattr(repository, "get_note_path", None)
+            if callable(get_note_path):
+                note_dir = get_note_path(source_note_dt).resolve().parent
+                candidate_roots.append(note_dir)
+            else:
+                candidate_roots.append(
+                    (vault_root / str(source_note_dt.year)).resolve()
+                )
+        candidate_roots.append(vault_root)
+
+        for base_dir in candidate_roots:
+            candidate = (base_dir / attachment_rel).resolve()
+
+            if candidate != vault_root and vault_root not in candidate.parents:
+                continue
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+        return None
 
     async def send_chunked_text(
         self,
@@ -81,7 +100,10 @@ class NoteDeliveryService:
     ) -> None:
         """Send one attachment based on file extension with graceful fallback."""
         repository = self._repository()
-        attachment_path = self.resolve_attachment_path(attachment_rel)
+        attachment_path = self.resolve_attachment_path(
+            attachment_rel,
+            source_note_dt=source_note_dt,
+        )
         if attachment_path is None:
             fetch_bytes = getattr(repository, "get_attachment_bytes", None)
             if not callable(fetch_bytes):
