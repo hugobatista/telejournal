@@ -231,26 +231,26 @@ telejournal version
 telejournal help
 ```
 
-### Using secret-tool
+### Using kleys
 
-If you use Linux secret service (`secret-tool`), you can skip a local `.env`
-and use [secret-tool-run](https://go.hugobatista.com/gh/secret-tool-run):
+If you use a system keyring, you can skip a local `.env`
+and use [kleys](https://go.hugobatista.com/gh/kleys):
 
 ```bash
-secret-tool-run telejournal run
+kleys telejournal run
 ```
 
 
-Instead of using env file variables, you can also keep those secrets in a yaml format and use secret-tool-run with it:
+Instead of using env file variables, you can also keep those secrets in a yaml format and use kleys with it:
 
 ```bash
-secret-tool-run --file config.yaml uv run telejournal run config.yaml --verbose
+kleys --secrets-file config.yaml uv run telejournal run config.yaml --verbose
 ```
 
 You even avoid the creation of config.yaml at all and use a file descriptor:
 
 ```bash
-secret-tool-run uv run telejournal run @SECRETS@  --verbose
+kleys uv run telejournal run @SECRETS@  --verbose
 ```
 Where `SECRETS` is a file descriptor containing the yaml configuration.
 
