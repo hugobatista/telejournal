@@ -3,7 +3,7 @@
 [![GHCR Tag](https://img.shields.io/github/v/tag/hugobatista/telejournal?logo=docker&logoColor=white&label=GHCR)](https://go.hugobatista.com/gh/telejournal/packages)
 [![Test](https://go.hugobatista.com/gh/telejournal/actions/workflows/test.yml/badge.svg)](https://go.hugobatista.com/gh/telejournal/actions/workflows/test.yml)
 [![Lint](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml/badge.svg)](https://go.hugobatista.com/gh/telejournal/actions/workflows/lint.yml)
-# Telegram Journal Bot
+# Telegram Journal Bot 📔
 
 **Capture thoughts on Telegram, persist them in Obsidian, GitHub, OneDrive, or Google Drive, and never lose a moment again.**
 
