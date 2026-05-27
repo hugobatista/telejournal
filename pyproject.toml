@@ -15,7 +15,7 @@ authors = [
     { name = "Hugo Batista <code at hugobatista.com>" },
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -42,7 +42,7 @@ build-backend = "hatchling.build"
 packages = ["src/telejournal"]
 
 [tool.hatch.envs.default]
-features = ["dev"]
+dependency-groups = ["dev"]
 
 [tool.hatch.envs.default.scripts]
 lint = "ruff check . --fix"
