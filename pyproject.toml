@@ -48,6 +48,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/telejournal"]
 
+[tool.hatch.build.targets.sdist]
+only-include = ["src/telejournal", "README.md"]
+
 [tool.hatch.envs.default]
 type = "virtual"
 path = ".venv"
