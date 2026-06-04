@@ -69,7 +69,7 @@ check = ["lint-check", "format-check", "test", "typecheck"]
 quote-style = "double"
 
 [tool.pytest.ini_options]
-addopts = "-v --cov-report=term-missing"
+addopts = "-v --cov --cov-report=term-missing"
 pythonpath = ["src"]
 testpaths = ["tests"]
 
