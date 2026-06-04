@@ -40,10 +40,13 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: Sync dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --only-group lint
 
-      - name: Run ruff check
-        run: uv run ruff check src/ tests/
+      - name: Lint check
+        run: uv run hatch run lint-check
 
-      - name: Run black format check
-        run: uv run black --check src/ tests/
+      - name: Format check
+        run: uv run hatch run format-check
+
+      - name: Type check
+        run: uv run hatch run typecheck
