@@ -17,20 +17,18 @@ authors = [
 
 [dependency-groups]
 lint = [
-    "hatch>=1.16.5",
-    "black>=23.0.0",
     "mypy>=1.10",
     "ruff>=0.1.0",
     "types-aiofiles>=24.1.0.20241221",
     "types-PyYAML>=6.0.12.20240917",
 ]
 test = [
-    "hatch>=1.16.5",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
 ]
 dev = [
+    "hatch>=1.16.5",
     {include-group = "lint"},
     {include-group = "test"},
 ]
@@ -39,6 +37,7 @@ dev = [
 telejournal = "telejournal.main:run"
 
 [tool.uv]
+required-version = "0.11.18"
 exclude-newer = "30 days"
 
 
@@ -55,13 +54,16 @@ path = ".venv"
 
 [tool.hatch.envs.default.scripts]
 lint = "ruff check . --fix"
-format = "black ."
+format = "ruff format ."
 lint-check = "ruff check ."
-format-check = "black --check ."
+format-check = "ruff format --check ."
 test = "pytest"
 typecheck = "mypy"
 validate = ["lint", "format", "test", "typecheck"]
 check = ["lint-check", "format-check", "test", "typecheck"]
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.pytest.ini_options]
 addopts = "-v"

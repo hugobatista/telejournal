@@ -394,8 +394,7 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
                     )
                 description = str(token_payload.get("error_description") or "").strip()
                 raise RuntimeError(
-                    "OneDrive device authorization failed: "
-                    f"{error_code} {description}"
+                    f"OneDrive device authorization failed: {error_code} {description}"
                 )
 
             self._apply_token_payload(token_payload)
@@ -1010,7 +1009,7 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
 
             self._flush_cycle += 1
             LOGGER.info(
-                ("Flushing OneDrive batch #%d " "(%d upserts, %d deletes; reason=%s)"),
+                ("Flushing OneDrive batch #%d (%d upserts, %d deletes; reason=%s)"),
                 self._flush_cycle,
                 len(pending_puts),
                 len(pending_deletes),

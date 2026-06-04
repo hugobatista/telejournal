@@ -294,8 +294,7 @@ def run_command(
         None,
         "--storage-provider",
         help=(
-            "Storage provider: obsidian_vault, github_repo, onedrive, "
-            "or google_drive."
+            "Storage provider: obsidian_vault, github_repo, onedrive, or google_drive."
         ),
     ),
     obsidian_vault_root: Path | None = typer.Option(
@@ -350,8 +349,7 @@ def run_command(
         None,
         "--github-batch-window-seconds",
         help=(
-            "Flush pending github_repo writes in bursts every N seconds "
-            "(default: 60)."
+            "Flush pending github_repo writes in bursts every N seconds (default: 60)."
         ),
     ),
     onedrive_tenant_id: str | None = typer.Option(
@@ -385,9 +383,7 @@ def run_command(
     onedrive_batch_window_seconds: int | None = typer.Option(
         None,
         "--onedrive-batch-window-seconds",
-        help=(
-            "Flush pending onedrive writes in bursts every N seconds " "(default: 60)."
-        ),
+        help=("Flush pending onedrive writes in bursts every N seconds (default: 60)."),
     ),
     onedrive_access_token: str | None = typer.Option(
         None,
@@ -531,7 +527,7 @@ def run_command(
                 echo=True,
             )
             output.info(
-                ("GitHub batch window: " f"{settings.github_batch_window_seconds}s"),
+                (f"GitHub batch window: {settings.github_batch_window_seconds}s"),
                 echo=True,
             )
         elif settings.storage_provider == "onedrive":
@@ -543,10 +539,7 @@ def run_command(
                 echo=True,
             )
             output.info(
-                (
-                    "OneDrive batch window: "
-                    f"{settings.onedrive_batch_window_seconds}s"
-                ),
+                (f"OneDrive batch window: {settings.onedrive_batch_window_seconds}s"),
                 echo=True,
             )
         else:

@@ -23,15 +23,15 @@ jobs:
         echo "datetime: $(date '+%Y-%m-%d %H:%M:%S')"
 
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6.0.2
    
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6.2.0
       with:
         python-version: '3.13'
     
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v8.1.0
 
     - name: Get version
       id: get_version

@@ -305,8 +305,7 @@ class GoogleDriveRepository(FlushEventPublisher):  # pragma: no cover
         if error_code:
             description = str(payload.get("error_description") or "").strip()
             raise RuntimeError(
-                "Google Drive refresh token request failed: "
-                f"{error_code} {description}"
+                f"Google Drive refresh token request failed: {error_code} {description}"
             )
         self._apply_token_payload(payload)
 
@@ -621,8 +620,7 @@ class GoogleDriveRepository(FlushEventPublisher):  # pragma: no cover
                 ) from exc
             except OSError as exc:
                 raise RuntimeError(
-                    "Google Drive upload request failed "
-                    f"({method} {endpoint}): {exc}"
+                    f"Google Drive upload request failed ({method} {endpoint}): {exc}"
                 ) from exc
 
         raise RuntimeError("Google Drive upload request failed after retry")
@@ -901,10 +899,7 @@ class GoogleDriveRepository(FlushEventPublisher):  # pragma: no cover
 
             self._flush_cycle += 1
             LOGGER.info(
-                (
-                    "Flushing Google Drive batch #%d "
-                    "(%d upserts, %d deletes; reason=%s)"
-                ),
+                ("Flushing Google Drive batch #%d (%d upserts, %d deletes; reason=%s)"),
                 self._flush_cycle,
                 len(pending_puts),
                 len(pending_deletes),

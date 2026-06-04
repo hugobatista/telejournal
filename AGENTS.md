@@ -7,9 +7,9 @@ Run all commands via `uv run` (source installs) or direct if installed via pip.
 | Action | Command |
 |--------|---------|
 | Lint | `uv run ruff check src/ tests/` |
-| Format check | `uv run black --check src/ tests/` |
+| Format check | `uv run ruff format --check .` |
 | Test (100% coverage required) | `uv run pytest --cov=src/telejournal` |
-| Typecheck (strict) | `uv run mypy src --strict --no-incremental` |
+| Typecheck (strict) | `uv run mypy` |
 | Full validate | `uv run hatch run validate` or `bash validate.sh` |
 
 Single-test: `uv run pytest tests/test_main.py -k test_name -v`

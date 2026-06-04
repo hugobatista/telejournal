@@ -29,24 +29,26 @@ jobs:
           echo "datetime: $(date '+%Y-%m-%d %H:%M:%S')"
 
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6.2.0
         with:
-          python-version: '3.13'
+          python-version-file: pyproject.toml
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --frozen --only-group lint
+        run: uv sync --frozen --no-dev --group lint --no-install-project
 
       - name: Lint check
-        run: uv run hatch run lint-check
+        run: uv run --no-project ruff check .
 
       - name: Format check
-        run: uv run hatch run format-check
+        run: uv run --no-project ruff format --check .
 
       - name: Type check
-        run: uv run hatch run typecheck
+        run: uv run --no-project mypy

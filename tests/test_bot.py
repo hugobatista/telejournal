@@ -633,7 +633,8 @@ async def test_show_callback_sends_note_text_only(journal_bot: JournalBot) -> No
     await journal_bot.callback_router(update, context)
 
     payloads = [
-        call.args[1] for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+        call.args[1]
+        for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
     ]
     assert any("![[2026/attachments/pic.jpg]]" in payload for payload in payloads)
     assert not any(TG_ENTRY_START_TOKEN in payload for payload in payloads)
@@ -1683,10 +1684,12 @@ async def test_send_startup_message_notifies_all_configured_chats(
     await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
 
     sent_chat_ids = [
-        call.args[0] for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+        call.args[0]
+        for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
     ]
     sent_messages = [
-        call.args[1] for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+        call.args[1]
+        for call in context.bot.send_message.await_args_list  # type: ignore[attr-defined]
     ]
     assert sent_chat_ids == [2, 5, 9]
     assert sent_messages == [STARTUP_MESSAGE, STARTUP_MESSAGE, STARTUP_MESSAGE]
@@ -1702,7 +1705,9 @@ async def test_send_startup_message_includes_onedrive_auth_instructions(
         vault_root=journal_bot._settings.vault_root,
         allowed_user_ids={1},
     )
-    journal_bot._repository.build_authorization_instructions = lambda: "Run /storageauth start"  # type: ignore[attr-defined]
+    journal_bot._repository.build_authorization_instructions = lambda: (
+        "Run /storageauth start"
+    )  # type: ignore[attr-defined]
     context = _context()
 
     await journal_bot.send_startup_message(context)  # type: ignore[arg-type]
@@ -2024,7 +2029,8 @@ async def test_history_callback_raw_and_rendered_modes(
     )
     await journal_bot.callback_router(raw_update, raw_context)
     raw_payloads = [
-        call.args[1] for call in raw_context.bot.send_message.await_args_list  # type: ignore[attr-defined]
+        call.args[1]
+        for call in raw_context.bot.send_message.await_args_list  # type: ignore[attr-defined]
     ]
     assert any("![[2024/attachments/mem.jpg]]" in payload for payload in raw_payloads)
     assert not any(TG_ENTRY_START_TOKEN in payload for payload in raw_payloads)

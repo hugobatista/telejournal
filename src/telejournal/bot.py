@@ -151,8 +151,8 @@ class JournalBot:
                 *args,
                 **kwargs,
             ),
-            send_historical_notes_for_chat=lambda *args: self._send_historical_notes_for_chat(
-                *args
+            send_historical_notes_for_chat=lambda *args: (
+                self._send_historical_notes_for_chat(*args)
             ),
             should_include_timestamp=lambda chat_data, note_dt, now: (
                 self._should_include_timestamp(chat_data, note_dt, now)
@@ -218,8 +218,7 @@ class JournalBot:
                     InlineKeyboardButton(
                         "prompt_for_mood_if_missing",
                         callback_data=(
-                            f"{CONFIG_CALLBACK_PREFIX}edit:"
-                            "prompt_for_mood_if_missing"
+                            f"{CONFIG_CALLBACK_PREFIX}edit:prompt_for_mood_if_missing"
                         ),
                     )
                 ],
@@ -464,7 +463,7 @@ class JournalBot:
             )
 
         if backup_path is not None:
-            return f"{message}\n" f"Saved to {target_path}\n" f"Backup: {backup_path}"
+            return f"{message}\nSaved to {target_path}\nBackup: {backup_path}"
         return f"{message}\nSaved to {target_path}"
 
     async def _maybe_handle_config_text_input(
@@ -520,7 +519,7 @@ class JournalBot:
                 parsed_time = _parse_daily_brief_time_utc(raw_text)
             except ValueError:
                 await message.reply_text(
-                    "Invalid value. Use 0, HH:MM, or HH:MM:SS in UTC. " "Example: 09:00"
+                    "Invalid value. Use 0, HH:MM, or HH:MM:SS in UTC. Example: 09:00"
                 )
                 return True
 

@@ -180,7 +180,7 @@ class CallbackRouterService:
             }
             chat_data[self._config_flow_key] = {"state": "await_confirm"}
             await query.edit_message_text(
-                f"Apply {pending_key} = " f"{'true' if value else 'false'}?",
+                f"Apply {pending_key} = {'true' if value else 'false'}?",
                 reply_markup=self._config_confirm_keyboard(),
             )
             return
@@ -382,9 +382,7 @@ class CallbackRouterService:
                 await query.edit_message_text("No entries to delete.")
                 return
             deleted_preview = _truncate_message(deleted, max_len=3600)
-            await query.edit_message_text(
-                f"🗑️ Deleted last entry:\n\n{deleted_preview}"
-            )
+            await query.edit_message_text(f"🗑️ Deleted last entry:\n\n{deleted_preview}")
             return
 
         if action == "day":

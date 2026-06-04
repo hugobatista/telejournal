@@ -48,7 +48,9 @@ def process_message(msg_div: Tag) -> dict[str, Any]:
     classes = (
         classes_raw
         if isinstance(classes_raw, list)
-        else [classes_raw] if classes_raw else []
+        else [classes_raw]
+        if classes_raw
+        else []
     )
     result["classes"] = classes
 
@@ -101,7 +103,9 @@ def process_message(msg_div: Tag) -> dict[str, Any]:
         child_classes_list = (
             child_classes
             if isinstance(child_classes, list)
-            else [child_classes] if child_classes else []
+            else [child_classes]
+            if child_classes
+            else []
         )
         if (
             child.name == "div"
@@ -174,7 +178,9 @@ def convert_html_to_markdown(html_path: str, output_dir: str) -> int:
             element_classes_list = (
                 element_classes
                 if isinstance(element_classes, list)
-                else [element_classes] if element_classes else []
+                else [element_classes]
+                if element_classes
+                else []
             )
             if "msg" in element_classes_list:
                 msg_data = process_message(element)
@@ -228,10 +234,10 @@ def convert_html_to_markdown(html_path: str, output_dir: str) -> int:
         for msg_data in messages:
             if msg_data["type"] == "status":
                 # Status message
-                markdown_lines.append(f'*{msg_data["content"]}*')
+                markdown_lines.append(f"*{msg_data['content']}*")
                 if msg_data["timestamp"]:
                     markdown_lines.append(
-                        f' %% {format_timestamp(msg_data["timestamp"])} %%'
+                        f" %% {format_timestamp(msg_data['timestamp'])} %%"
                     )
                 markdown_lines.append("\n\n")
 
@@ -240,12 +246,12 @@ def convert_html_to_markdown(html_path: str, output_dir: str) -> int:
                 # Add timestamp as markdown comment
                 if msg_data["timestamp"]:
                     markdown_lines.append(
-                        f'%% {format_timestamp(msg_data["timestamp"])} %%\n\n'
+                        f"%% {format_timestamp(msg_data['timestamp'])} %%\n\n"
                     )
 
                 # Add reply/quote
                 if "reply_to" in msg_data:
-                    markdown_lines.append(f'> {msg_data["reply_to"]}\n\n')
+                    markdown_lines.append(f"> {msg_data['reply_to']}\n\n")
 
                 # Add attachments as images
                 for att in msg_data["attachments"]:
@@ -280,7 +286,7 @@ def convert_html_to_markdown(html_path: str, output_dir: str) -> int:
 
                 # Add message content
                 if msg_data["content"]:
-                    markdown_lines.append(f'{msg_data["content"]}')
+                    markdown_lines.append(f"{msg_data['content']}")
                     if msg_data.get("edited"):
                         markdown_lines.append(" *(edited)*")
                     markdown_lines.append("\n\n")

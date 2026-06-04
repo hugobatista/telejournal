@@ -123,11 +123,7 @@ def marker_end_comment(marker: str) -> str:
 def wrap_body_with_marker(body: str, marker: str) -> str:
     """Wrap body payload with marker comments for future in-place updates."""
     clean_body = body.strip()
-    return (
-        f"{marker_start_comment(marker)}\n"
-        f"{clean_body}\n"
-        f"{marker_end_comment(marker)}"
-    )
+    return f"{marker_start_comment(marker)}\n{clean_body}\n{marker_end_comment(marker)}"
 
 
 def format_timestamp_as_prefixed_quote(content: str) -> str:
@@ -236,7 +232,7 @@ def format_location_entry(latitude: float, longitude: float) -> str:
     lon_abs = abs(longitude)
 
     map_url = f"https://maps.google.com/?q={latitude},{longitude}"
-    return "Location: " f"{lat_abs:.4f}° {ns}, {lon_abs:.4f}° {ew} " f"[Map]({map_url})"
+    return f"Location: {lat_abs:.4f}° {ns}, {lon_abs:.4f}° {ew} [Map]({map_url})"
 
 
 def format_photo_entry(caption: str, attachment_rel: str, fallback: str) -> str:
