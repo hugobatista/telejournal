@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from io import BytesIO
+from collections.abc import Callable
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from telegram.error import TelegramError
 

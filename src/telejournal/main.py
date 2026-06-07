@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import typer
-
 from dotenv import load_dotenv
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, ConversationHandler
@@ -678,7 +677,7 @@ def install_service_command(
             "Check service status with: sudo systemctl status telejournal.service",
             echo=True,
         )
-    except (IOError, OSError) as exc:
+    except OSError as exc:
         output.error(
             f"Failed to write service file: {exc}",
             echo=True,

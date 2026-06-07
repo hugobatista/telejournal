@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from telejournal.config import _merge_configs
-from telejournal.config_loader import expand_env_vars, load_env_config, load_yaml_config
+from telejournal.config_loader import (
+    expand_env_vars,
+    load_env_config,
+    load_yaml_config,
+)
 
 
 def test_expand_env_vars_nested(monkeypatch: pytest.MonkeyPatch) -> None:

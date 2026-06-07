@@ -5,23 +5,24 @@ Preserves timestamps, dates, attachments, and replies while discarding CSS styli
 Creates one file per day with frontmatter, organized by year.
 """
 
-from bs4 import BeautifulSoup, Tag
-import re
-import sys
 import os
+import re
 import shutil
-from datetime import datetime, timezone
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
+from bs4 import BeautifulSoup, Tag
 
 
-def extract_message_id(comment: Any) -> Optional[str]:
+def extract_message_id(comment: Any) -> str | None:
     """Extract message ID from HTML comment."""
     match = re.search(r"_id:(\d+)", str(comment))
     return match.group(1) if match else None
 
 
-def parse_date(date_str: str) -> Optional[datetime]:
+def parse_date(date_str: str) -> datetime | None:
     """Parse date string to datetime object."""
     try:
         return datetime.strptime(date_str, "%b %d, %Y")
@@ -29,7 +30,7 @@ def parse_date(date_str: str) -> Optional[datetime]:
         return None
 
 
-def format_timestamp(timestamp_str: Optional[str]) -> str:
+def format_timestamp(timestamp_str: str | None) -> str:
     """Format Signal timestamp as HH:MM:SS."""
     raw = timestamp_str or ""
     match = re.search(r"\b(\d{2}):(\d{2})(?::(\d{2}))?$", raw)
@@ -144,12 +145,12 @@ def process_message(msg_div: Tag) -> dict[str, Any]:
 def convert_html_to_markdown(html_path: str, output_dir: str) -> int:
     """Convert Signal HTML export to Markdown, one file per day organized by year."""
 
-    with open(html_path, "r", encoding="utf-8") as f:
+    with open(html_path, encoding="utf-8") as f:
         html_content = f.read()
 
     soup = BeautifulSoup(html_content, "html.parser")
 
-    created_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+    created_utc = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")
 
     # Find the conversation box
     conversation_box = soup.find("div", class_="conversation-box")
@@ -164,12 +165,12 @@ def convert_html_to_markdown(html_path: str, output_dir: str) -> int:
     html_dir = os.path.dirname(html_path)
 
     # Track copied attachments per year
-    copied_attachments: dict[tuple[int, str], Optional[str]] = {}
+    copied_attachments: dict[tuple[int, str], str | None] = {}
 
     # Process all messages grouped by date
     daily_messages: dict[str, list[dict[str, Any]]] = {}
-    current_date: Optional[datetime] = None
-    current_date_str: Optional[str] = None
+    current_date: datetime | None = None
+    current_date_str: str | None = None
 
     for element in conversation_box.children:
         # Process message divs

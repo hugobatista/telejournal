@@ -21,15 +21,15 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
 from .common import (
+    _TIMESTAMP_RE,
+    LOGGER,
     FlushEvent,
     FlushEventPublisher,
-    LOGGER,
     NoteData,
     PendingWrite,
     ProviderCapabilities,
     StorageAuthorizationRequiredError,
     WriteVisibility,
-    _TIMESTAMP_RE,
 )
 from .github import GitHubRepository
 
@@ -307,10 +307,8 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
             details.append(message)
         else:
             details.append(
-                (
-                    "Open the verification URL, complete login, then run "
-                    "/storageauth complete to capture tokens."
-                )
+                "Open the verification URL, complete login, then run "
+                "/storageauth complete to capture tokens."
             )
         if verification_uri_complete:
             details.append(f"Verification URL: {verification_uri_complete}")
@@ -535,10 +533,8 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
                 self._refresh_access_token()
             except RuntimeError:
                 LOGGER.warning(
-                    (
-                        "OneDrive token refresh after HTTP 401 failed; "
-                        "interactive re-authorization is required"
-                    )
+                    "OneDrive token refresh after HTTP 401 failed; "
+                    "interactive re-authorization is required"
                 )
                 return False
         return True
@@ -608,10 +604,7 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
                     raise self._authorization_required_error() from exc
                 details = self._format_graph_error_details(error_body)
                 raise RuntimeError(
-                    (
-                        "OneDrive API request failed "
-                        f"(GET {endpoint}): {exc.code}{details}"
-                    )
+                    f"OneDrive API request failed (GET {endpoint}): {exc.code}{details}"
                 ) from exc
             except OSError as exc:
                 raise RuntimeError(
@@ -672,10 +665,8 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
                     raise self._authorization_required_error() from exc
                 details = self._format_graph_error_details(error_body)
                 raise RuntimeError(
-                    (
-                        "OneDrive API request failed "
-                        f"({method} {endpoint}): {exc.code}{details}"
-                    )
+                    "OneDrive API request failed "
+                    f"({method} {endpoint}): {exc.code}{details}"
                 ) from exc
             except OSError as exc:
                 raise RuntimeError(
@@ -735,10 +726,8 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
                     raise self._authorization_required_error() from exc
                 details = self._format_graph_error_details(error_body)
                 raise RuntimeError(
-                    (
-                        "OneDrive API request failed "
-                        f"({method} {endpoint}): {exc.code}{details}"
-                    )
+                    "OneDrive API request failed "
+                    f"({method} {endpoint}): {exc.code}{details}"
                 ) from exc
             except OSError as exc:
                 raise RuntimeError(
@@ -762,10 +751,8 @@ class OneDriveRepository(FlushEventPublisher):  # pragma: no cover
             safe_url = self._redact_url_for_logs(download_url)
             details = self._format_graph_error_details(body)
             raise RuntimeError(
-                (
-                    "OneDrive download URL request failed "
-                    f"({safe_url}): {exc.code}{details}"
-                )
+                "OneDrive download URL request failed "
+                f"({safe_url}): {exc.code}{details}"
             ) from exc
         except OSError as exc:
             raise RuntimeError(f"OneDrive download URL request failed ({exc})") from exc

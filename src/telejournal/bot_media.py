@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, cast
 
 from telegram import Update
 from telegram.ext import ContextTypes, Job

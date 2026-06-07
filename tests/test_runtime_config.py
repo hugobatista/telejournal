@@ -113,7 +113,7 @@ def test_persist_runtime_settings_creates_default_config_when_missing(
     payload = yaml.safe_load(target_path.read_text(encoding="utf-8"))
     assert payload["telegram_token"] == "token"
     assert payload["storage"]["provider"] == "obsidian_vault"
-    assert payload["storage"]["obsidian_vault"]["root"] == str((tmp_path / "vault"))
+    assert payload["storage"]["obsidian_vault"]["root"] == str(tmp_path / "vault")
     assert payload["allowed_user_ids"] == [1, 3]
     assert payload["tag_choices"] == ["family", "focus"]
     assert payload["prompt_for_mood_if_missing"] is True

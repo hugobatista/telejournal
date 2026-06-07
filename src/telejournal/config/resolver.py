@@ -6,7 +6,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from telejournal.config_loader import expand_env_vars, load_env_config, load_yaml_config
+from telejournal.config_loader import (
+    expand_env_vars,
+    load_env_config,
+    load_yaml_config,
+)
 
 from .constants import (
     DEFAULT_SETTINGS,

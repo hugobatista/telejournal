@@ -21,6 +21,7 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
 from .common import (
+    _TIMESTAMP_RE,
     LOGGER,
     FlushEvent,
     FlushEventPublisher,
@@ -28,7 +29,6 @@ from .common import (
     PendingWrite,
     ProviderCapabilities,
     WriteVisibility,
-    _TIMESTAMP_RE,
 )
 
 

@@ -6,9 +6,9 @@ from .common import (
     NoteData,
     PendingWrite,
     ProviderCapabilities,
+    StorageAuthorizationRequiredError,
     SupportsFlushEventSubscription,
     SupportsProviderCapabilities,
-    StorageAuthorizationRequiredError,
     WriteVisibility,
 )
 from .factory import build_repository

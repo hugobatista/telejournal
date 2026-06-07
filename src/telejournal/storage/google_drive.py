@@ -21,15 +21,15 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
 from .common import (
+    _TIMESTAMP_RE,
+    LOGGER,
     FlushEvent,
     FlushEventPublisher,
-    LOGGER,
     NoteData,
     PendingWrite,
     ProviderCapabilities,
     StorageAuthorizationRequiredError,
     WriteVisibility,
-    _TIMESTAMP_RE,
 )
 from .github import GitHubRepository
 
@@ -261,12 +261,10 @@ class GoogleDriveRepository(FlushEventPublisher):  # pragma: no cover
                 description = str(payload.get("error_description") or "").strip()
                 if error_code == "invalid_client":
                     raise RuntimeError(
-                        (
-                            "Google Drive device-code request failed: invalid_client. "
-                            "Use an OAuth client configured for Device Authorization "
-                            "(TVs and Limited Input devices) and set "
-                            "storage.google_drive.client_id/client_secret accordingly."
-                        )
+                        "Google Drive device-code request failed: invalid_client. "
+                        "Use an OAuth client configured for Device Authorization "
+                        "(TVs and Limited Input devices) and set "
+                        "storage.google_drive.client_id/client_secret accordingly."
                     ) from exc
                 raise RuntimeError(
                     (

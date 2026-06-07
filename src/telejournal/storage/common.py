@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Callable, Protocol
+from enum import StrEnum
+from typing import Any, Protocol
 
 LOGGER = logging.getLogger(__name__)
 _TIMESTAMP_RE = re.compile(
@@ -30,7 +31,7 @@ class PendingWrite:
     message: str
 
 
-class WriteVisibility(str, Enum):
+class WriteVisibility(StrEnum):
     """Describe when writes become externally visible to the user."""
 
     IMMEDIATE = "immediate"
@@ -53,7 +54,7 @@ class SupportsProviderCapabilities(Protocol):
 class SupportsFlushEventSubscription(Protocol):
     """Protocol for providers that support flush-event listeners."""
 
-    def add_flush_listener(self, listener: Callable[["FlushEvent"], None]) -> None:
+    def add_flush_listener(self, listener: Callable[[FlushEvent], None]) -> None:
         """Register one callback invoked on successful queue flushes."""
 
 

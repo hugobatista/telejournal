@@ -33,18 +33,12 @@ from telejournal.bot import (
     STARTUP_MESSAGE,
     TAG_CALLBACK_PREFIX,
     JournalBot,
+    _chunk_text,
     _mood_keyboard,
     _tags_keyboard,
-    _chunk_text,
     _truncate_message,
 )
-from telejournal.config import Settings, STORAGE_PROVIDER_ONEDRIVE
-from telejournal.storage import (
-    FlushEvent,
-    OneDriveAuthorizationRequiredError,
-    ProviderCapabilities,
-    WriteVisibility,
-)
+from telejournal.config import STORAGE_PROVIDER_ONEDRIVE, Settings
 from telejournal.formatting import (
     TG_ENTRY_END_TOKEN,
     TG_ENTRY_START_TOKEN,
@@ -54,6 +48,12 @@ from telejournal.formatting import (
     marker_start_comment,
     parse_note_render_payload,
     wrap_body_with_marker,
+)
+from telejournal.storage import (
+    FlushEvent,
+    OneDriveAuthorizationRequiredError,
+    ProviderCapabilities,
+    WriteVisibility,
 )
 
 

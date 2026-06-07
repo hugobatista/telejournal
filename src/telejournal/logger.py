@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
-from pathlib import Path
 import sys
+from pathlib import Path
 
 _LOG_FORMAT = "[%(asctime)s] %(levelname)s [%(name)s] %(message)s"
 _LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"

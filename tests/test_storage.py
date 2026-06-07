@@ -15,8 +15,8 @@ from urllib import error as urllib_error
 import pytest
 import yaml
 
-from telejournal.formatting import marker_end_comment, marker_start_comment
 from telejournal.config import Settings
+from telejournal.formatting import marker_end_comment, marker_start_comment
 from telejournal.storage import (
     FlushEvent,
     GitHubRepository,
@@ -759,7 +759,7 @@ def test_github_request_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = GitHubRepository("acme", "journal", "token")
 
     class _Resp:
-        def __enter__(self) -> "_Resp":
+        def __enter__(self) -> _Resp:
             return self
 
         def __exit__(self, *_args: object) -> None:
@@ -1018,7 +1018,7 @@ async def test_github_repository_remaining_branches(
     assert repo.vault_root == Path("/")
 
     class _EmptyResp:
-        def __enter__(self) -> "_EmptyResp":
+        def __enter__(self) -> _EmptyResp:
             return self
 
         def __exit__(self, *_args: object) -> None:
@@ -1809,7 +1809,7 @@ def test_onedrive_request_helpers_and_path_helpers(
     )
 
     class _JsonResp:
-        def __enter__(self) -> "_JsonResp":
+        def __enter__(self) -> _JsonResp:
             return self
 
         def __exit__(self, *_args: object) -> None:
@@ -1825,7 +1825,7 @@ def test_onedrive_request_helpers_and_path_helpers(
     assert repo._request_json("GET", "/x") == {"ok": True}
 
     class _EmptyResp:
-        def __enter__(self) -> "_EmptyResp":
+        def __enter__(self) -> _EmptyResp:
             return self
 
         def __exit__(self, *_args: object) -> None:
@@ -1871,7 +1871,7 @@ def test_onedrive_request_helpers_and_path_helpers(
         repo._request_json("GET", "/x")
 
     class _BytesResp:
-        def __enter__(self) -> "_BytesResp":
+        def __enter__(self) -> _BytesResp:
             return self
 
         def __exit__(self, *_args: object) -> None:

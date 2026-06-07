@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from calendar import month_name, monthrange
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler

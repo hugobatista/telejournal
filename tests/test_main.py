@@ -9,8 +9,8 @@ import pytest
 from telegram.ext import CommandHandler, ConversationHandler
 from typer.testing import CliRunner
 
-from telejournal.config import Settings
 from telejournal import main as main_module
+from telejournal.config import Settings
 
 RUNNER = CliRunner()
 
@@ -30,11 +30,11 @@ class _FakeBuilder:
         self.last_token: str | None = None
         self.last_post_init: object | None = None
 
-    def token(self, token: str) -> "_FakeBuilder":
+    def token(self, token: str) -> _FakeBuilder:
         self.last_token = token
         return self
 
-    def post_init(self, callback: object) -> "_FakeBuilder":
+    def post_init(self, callback: object) -> _FakeBuilder:
         self.last_post_init = callback
         return self
 

@@ -17,11 +17,11 @@ from telegram import PhotoSize, Video, VideoNote, Voice
 from telejournal.formatting import marker_end_comment, marker_start_comment
 
 from .common import (
+    _TIMESTAMP_RE,
     LOGGER,
     NoteData,
     ProviderCapabilities,
     WriteVisibility,
-    _TIMESTAMP_RE,
 )
 
 
@@ -132,7 +132,7 @@ class VaultRepository:
         if not note_path.exists():
             return NoteData(frontmatter={}, body="")
 
-        async with aiofiles.open(note_path, "r", encoding="utf-8") as handle:
+        async with aiofiles.open(note_path, encoding="utf-8") as handle:
             content = await handle.read()
 
         frontmatter, body = self._split_frontmatter(content)
@@ -256,7 +256,7 @@ class VaultRepository:
         if not note_path.exists():
             return None
 
-        async with aiofiles.open(note_path, "r", encoding="utf-8") as handle:
+        async with aiofiles.open(note_path, encoding="utf-8") as handle:
             return await handle.read()
 
     async def get_same_day_previous_year_notes(
@@ -287,7 +287,7 @@ class VaultRepository:
         results: list[tuple[datetime, str]] = []
 
         for year, note_path in matched_paths:
-            async with aiofiles.open(note_path, "r", encoding="utf-8") as handle:
+            async with aiofiles.open(note_path, encoding="utf-8") as handle:
                 content = await handle.read()
             note_dt = datetime(
                 year,
