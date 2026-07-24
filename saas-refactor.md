@@ -418,16 +418,19 @@ class PendingWrite(Base):
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update, func, create_engine
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from telejournal.crypto import TokenEncryptor
 from telejournal.models import Base, User
 from cachetools import TTLCache
+
+LOGGER = logging.getLogger(__name__)
 
 # Default per-user settings (applied when key is absent from DB)
 DEFAULT_USER_SETTINGS: dict[str, Any] = {
@@ -551,6 +554,8 @@ class UserStore:
             )
             await session.execute(stmt)
             await session.commit()
+        # Caller must also invalidate JournalBot._repositories[telegram_user_id]
+        # and JournalBot._users[telegram_user_id] after this call.
 
     # ── Per-User Settings ─────────────────────────────────────────
 
@@ -730,7 +735,7 @@ class UserStore:
                         registered_at=now,
                         settings=dict(DEFAULT_USER_SETTINGS),
                         storage_provider=default_storage_provider,
-                        storage_config=await self._encrypt_storage_config(
+                        storage_config=self._encrypt_storage_config(
                             default_storage_provider, default_storage
                         ),
                         daily_brief_time_utc=DEFAULT_USER_SETTINGS["daily_brief_time_utc"],
@@ -759,6 +764,16 @@ class UserStore:
             return config
         fields = ENCRYPTED_STORAGE_FIELDS.get(provider, [])
         return self._encryptor.decrypt_dict(config, fields)
+
+    def decrypt_storage_config(
+        self, provider: str, config: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Public wrapper for _decrypt_storage_config.
+
+        Callers outside UserStore (e.g., JournalBot._get_repository)
+        should use this instead of the private method.
+        """
+        return self._decrypt_storage_config(provider, config)
 ```
 
 ### 7.3 Helper: `get_user_settings_value`
@@ -849,7 +864,7 @@ class TokenEncryptor:
 ### 8.4 Encryption/Decryption Points
 
 - **Write:** `UserStore.update_storage()` → `_encrypt_storage_config()` → stores encrypted JSON
-- **Read:** `UserStore.get_user()` → caller decrypts via `_decrypt_storage_config()` before passing to `build_repository_from_config()`
+- **Read:** `UserStore.get_user()` → caller decrypts via `decrypt_storage_config()` before passing to `build_repository_from_config()`
 - **Providers:** Receive already-decrypted tokens. **Zero changes to storage provider code.**
 
 ### 8.5 Token Refresh Persistence (OAuth Providers)
@@ -944,7 +959,7 @@ def _check_auth_self_hosted(self, user) -> AuthResult:
     Uses ``self._users`` (populated during ``sync_allowed_users``) for
     a synchronous lookup with no DB call on every message.  The cache
     is authoritative for onboarding status — if a user runs ``/setup``
-    and calls ``update_onboarding(user_id, True)``, the cache is
+    and calls ``complete_onboarding(user_id)``, the cache is
     invalidated and rebuilt on next access.
     """
     if user.id not in self._settings.allowed_user_ids:
@@ -952,7 +967,11 @@ def _check_auth_self_hosted(self, user) -> AuthResult:
 
     # Check onboarding via in-memory cache (sync, no DB hit)
     cached = self._users.get(user.id)
-    if cached is not None and not cached.onboarding_complete:
+    if cached is None:
+        # Cache miss (startup race) — assume onboarding incomplete
+        # so the user is directed to /setup
+        return AuthResult(authorized=False, reason="onboarding_incomplete", user_id=user.id)
+    if not cached.onboarding_complete:
         return AuthResult(authorized=False, reason="onboarding_incomplete", user_id=user.id)
 
     return AuthResult(authorized=True, reason="ok", user_id=user.id)
@@ -1031,7 +1050,7 @@ async def _handle_auth_response(self, update: Update, reason: str) -> None:
 self._repository: Any = build_repository(settings)  # Keep for single-user fast path
 self._repositories: dict[int, Any] = {}  # user_id → repository cache
 
-async def _get_repository(self, user_id: int) -> Any:
+async def _get_repository(self, user_id: int) -> Any | None:
     """Return the repository for a specific user.
 
     Resolution order:
@@ -1039,6 +1058,10 @@ async def _get_repository(self, user_id: int) -> Any:
     2. Self-hosted single-user fast path — use ``self._repository``
        directly (built from Settings at startup)
     3. Build from DB via ``UserStore`` and cache
+
+    Returns ``None`` if the user has no storage configured (SaaS
+    mode, onboarding incomplete, or missing from DB).  Callers
+    must check for ``None`` before using the repository.
     """
     # Fast path: single-user self-hosted, no DB lookup needed
     if (
@@ -1057,14 +1080,35 @@ async def _get_repository(self, user_id: int) -> Any:
     # Build from DB
     db_user = await self._user_store.get_user(user_id)
     if db_user is None or not db_user.onboarding_complete:
-        return self._repository  # Fallback
+        if self._settings.self_registration:
+            return None  # SaaS: user not ready, caller must bail
+        return self._repository  # Self-hosted fallback
 
-    decrypted_config = self._user_store._decrypt_storage_config(
+    decrypted_config = self._user_store.decrypt_storage_config(
         db_user.storage_provider, db_user.storage_config
     )
-    repo = build_repository_from_config(
-        db_user.storage_provider, decrypted_config
-    )
+
+    if self._settings.self_registration:
+        # SaaS: wrap with SQLite audit trail
+        from functools import partial
+        from telejournal.write_buffer import SqliteWritesRepository
+
+        token_persister = partial(
+            _token_persister, user_id, self._user_store, db_user.storage_provider
+        )
+        repo = build_saas_repository(
+            user_id=user_id,
+            provider=db_user.storage_provider,
+            config=decrypted_config,
+            session_factory=self._user_store._session_factory,
+            token_persister=token_persister,
+        )
+    else:
+        # Self-hosted: build directly from config
+        repo = build_repository_from_config(
+            db_user.storage_provider, decrypted_config
+        )
+
     self._repositories[user_id] = repo
     return repo
 ```
@@ -1228,11 +1272,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from telejournal.models import PendingWrite
@@ -1360,18 +1404,24 @@ class SqliteWritesRepository:
         path: str = "",
         payload: bytes | None = None,
     ) -> None:
-        """Write an audit entry to the pending_writes table.
+        """Record a completed write for the audit trail.
 
         The ``path`` and ``payload`` fields are populated for
         diagnostic purposes.  They are NOT used for automatic
         replay — see ``replay_pending()``.
+
+        All writes are recorded with ``status="completed"`` because
+        the provider write has already succeeded by the time this is
+        called.  The ``pending`` status was removed because the
+        pre-write + post-write pattern could not detect SIGKILL
+        reliably, and automatic replay risks duplicates.
         """
         write = PendingWrite(
             user_id=self._user_id,
             operation=operation,
             path=path,
             payload=payload,
-            status="completed",  # Write already succeeded against provider
+            status="completed",
             created_at=datetime.now(UTC).isoformat(),
         )
         async with self._session_factory() as session:
@@ -1379,7 +1429,12 @@ class SqliteWritesRepository:
             await session.commit()
 
     async def _handle_token_refresh(self, provider: Any) -> None:
-        """Persist refreshed OAuth tokens to DB via the injected callback."""
+        """Persist refreshed OAuth tokens to DB via the injected callback.
+
+        The ``token_persister`` callable is created via ``partial`` with
+        ``user_id``, ``user_store``, and ``provider_name`` already bound
+        (Section 8.5), so it only needs the token payload.
+        """
         if self._token_persister is None:
             return
         tokens = {}
@@ -1391,16 +1446,14 @@ class SqliteWritesRepository:
             tokens["token_expires_at_utc"] = provider._token_expires_at_utc
 
         if tokens:
-            provider_name = getattr(provider, "_provider_name", "unknown")
-            await self._token_persister(provider_name, tokens)
+            await self._token_persister(tokens)
 
     async def replay_pending(self) -> int:
-        """Audit any pending writes from a previous session.
+        """Audit any writes from a previous session.
 
-        On startup, any rows with ``status='pending'`` represent writes
-        that may have been lost (e.g., SIGKILL during write).  These
-        are logged for manual review and marked as ``completed`` to
-        prevent repeated alerts.
+        All writes are recorded with ``status="completed"`` (see
+        ``_record``).  This method exists as a hook for future
+        crash-recovery enhancements and currently returns 0.
 
         **Automatic replay is intentionally not implemented** because:
         1. Write operations (``append_entry``, ``save_photo``) have
@@ -1411,29 +1464,7 @@ class SqliteWritesRepository:
         For data recovery, check the provider directly (GitHub API
         history, OneDrive versioning, etc.).
         """
-        async with self._session_factory() as session:
-            stmt = (
-                select(PendingWrite)
-                .where(
-                    PendingWrite.user_id == self._user_id,
-                    PendingWrite.status == "pending",
-                )
-                .order_by(PendingWrite.id)
-            )
-            result = await session.execute(stmt)
-            writes = list(result.scalars().all())
-
-            for write in writes:
-                LOGGER.warning(
-                    "Pending write from previous session: user=%s op=%s path=%s",
-                    self._user_id,
-                    write.operation,
-                    write.path,
-                )
-                write.status = "completed"
-                await session.commit()
-
-            return len(writes)
+        return 0
 
     # ── Convenience delegates (support the duck-typed interface) ──
 
@@ -1759,11 +1790,27 @@ async def onboarding_callback(
     if data.startswith("select:"):
         provider = data.removeprefix("select:")
         await self._user_store.update_storage(user.id, provider, {})
+        self._repositories.pop(user.id, None)  # Invalidate repo cache on storage change
         await self._handle_provider_selected(query, provider)
     elif data == "test_connection":
         await self._test_github_connection(query, user.id)
     elif data == "complete_setup":
         await self._complete_setup(query, user.id)
+```
+
+### 13.3a `_complete_setup` Helper
+
+```python
+async def _complete_setup(self, query, user_id: int) -> None:
+    """Mark onboarding complete and confirm to user."""
+    await self._user_store.complete_onboarding(user_id)
+    self._repositories.pop(user_id, None)  # Invalidate repo cache
+    # Update in-memory user cache for self-hosted auth
+    if user_id in self._users:
+        self._users[user_id].onboarding_complete = True
+    await query.edit_message_text(
+        "✅ Setup complete! You can now send journal entries."
+    )
 ```
 
 ### 13.4 GitHub Setup Flow
@@ -1797,21 +1844,23 @@ async def _test_github_connection(self, query, user_id: int) -> None:
     if not user:
         return
 
-    config = self._user_store._decrypt_storage_config(
+    config = self._user_store.decrypt_storage_config(
         user.storage_provider, user.storage_config
     )
 
     try:
-        # Test: GET /repos/{owner}/{repo}
         repo = GitHubRepository(
             owner=config["owner"],
             repo=config["repo"],
             token=config["token"],
         )
         # Make a lightweight API call to verify access
+        today = datetime.now(UTC)
+        await repo.get_note_content(today)
         await query.edit_message_text("✅ Connection successful! Your journal is ready.")
         await self._user_store.complete_onboarding(user_id)
-        # Invalidate in-memory cache so _check_auth_self_hosted sees updated state
+        # Invalidate in-memory caches
+        self._repositories.pop(user_id, None)
         if user_id in self._users:
             user.onboarding_complete = True
             self._users[user_id] = user
@@ -1871,6 +1920,7 @@ def register_handlers(self, application: Application) -> None:
 
     if self._user_store is not None:
         application.add_handler(CommandHandler("setup", self.setup_command))
+        from telejournal.bot_onboarding import ONBOARDING_CALLBACK_PREFIX
         application.add_handler(
             CallbackQueryHandler(
                 self.onboarding_callback,
@@ -1913,6 +1963,33 @@ Currently `runtime_config.py` modifies a global `Settings` instance and persists
 ### 14.2 New Functions
 
 ```python
+def validate_setting_value(key: str, value: Any) -> Any:
+    """Validate and coerce a setting value.
+
+    Raises ``ValueError`` if the value is invalid for the given key.
+    """
+    if key == "daily_brief_time_utc":
+        if not isinstance(value, str) or len(value) != 5 or value[2] != ":":
+            raise ValueError("Format: HH:MM (e.g., 09:00)")
+        hour, minute = value.split(":")
+        if not (0 <= int(hour) <= 23 and 0 <= int(minute) <= 59):
+            raise ValueError("Hour must be 0-23, minute must be 0-59")
+        return value
+    if key == "prompt_for_mood_if_missing":
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes")
+        return bool(value)
+    if key == "message_timestamp_window_seconds":
+        v = int(value)
+        if v < 0:
+            raise ValueError("Must be non-negative")
+        return v
+    if key == "tag_choices":
+        if isinstance(value, str):
+            return [t.strip() for t in value.split(",")]
+        return list(value)
+    return value
+
 async def apply_user_setting(
     user_store: UserStore,
     user_id: int,
@@ -1969,7 +2046,7 @@ async def settings_command(self, update, context):
 
 ### 14.5 Per-User Settings Cache
 
-Reading `users.settings` from SQLite on every `/settings` command or mood-check is wasteful. The `UserStore` (Section 7.2) includes an in-memory LRU cache:
+Reading `users.settings` from SQLite on every `/settings` command or mood-check is wasteful. The `UserStore` (Section 7.2) includes an in-memory TTL cache:
 
 ```
 self._settings_cache: TTLCache[int, dict[str, Any]] = TTLCache(
@@ -1990,13 +2067,17 @@ self._settings_cache: TTLCache[int, dict[str, Any]] = TTLCache(
 ```python
 def _start_bot(telegram_token: str, settings: Settings) -> None:
     """Create and run the Telegram polling application."""
-    app_instance = (
-        Application.builder().token(telegram_token).post_init(post_init).build()
-    )
-    app_instance.bot_data[SETTINGS_BOT_DATA_KEY] = settings
+    journal_bot: JournalBot | None = None
+    user_store: UserStore | None = None
 
-    # ── NEW: Initialize UserStore (single async init) ────────────
-    async def _init_user_store() -> UserStore:
+    async def post_init(application: Application) -> None:
+        """Initialize UserStore and bot state inside the polling loop.
+
+        All async DB work happens here so the engine is bound to the
+        same event loop that ``run_polling()`` creates.
+        """
+        nonlocal journal_bot, user_store
+
         database_url = settings.database_url
         encryptor = None
         encryption_key = os.getenv("TELEJOURNAL_ENCRYPTION_KEY")
@@ -2007,44 +2088,46 @@ def _start_bot(telegram_token: str, settings: Settings) -> None:
                 "TELEJOURNAL_ENCRYPTION_KEY is required in SaaS mode"
             )
 
-        store = UserStore(database_url, encryptor=encryptor)
-        await store.initialize()
+        user_store = UserStore(database_url, encryptor=encryptor)
+        await user_store.initialize()
 
         if not settings.self_registration and settings.allowed_user_ids:
             default_storage = _extract_default_storage(settings)
-            await store.sync_allowed_users(
+            await user_store.sync_allowed_users(
                 settings.allowed_user_ids,
                 default_storage,
                 settings.storage_provider,
             )
 
-        return store
+        journal_bot = JournalBot(settings, user_store=user_store)
 
-    user_store = asyncio.run(_init_user_store())
-
-    # ── Pass user_store to JournalBot ─────────────────────────────
-    journal_bot = JournalBot(settings, user_store=user_store)
-
-    # Populate in-memory user cache for self-hosted fast path
-    if not settings.self_registration:
-        async def _populate_users() -> None:
+        # Populate in-memory user cache for self-hosted fast path
+        if not settings.self_registration:
             users = await user_store.list_active_users()
             journal_bot._users = {u.telegram_user_id: u for u in users}
-        asyncio.run(_populate_users())
 
-    journal_bot.register_handlers(app_instance)
-    if app_instance.job_queue is None:
-        raise RuntimeError("Job queue is unavailable; install job-queue extras")
-    journal_bot.register_jobs(app_instance.job_queue)
+        journal_bot.register_handlers(application)
+        if application.job_queue is None:
+            raise RuntimeError("Job queue is unavailable; install job-queue extras")
+        journal_bot.register_jobs(application.job_queue)
+
+    app_instance = (
+        Application.builder().token(telegram_token).post_init(post_init).build()
+    )
+    app_instance.bot_data[SETTINGS_BOT_DATA_KEY] = settings
 
     try:
         app_instance.run_polling(allowed_updates=Update.ALL_TYPES)
     finally:
         async def _shutdown() -> None:
-            await journal_bot.shutdown()
-            await user_store.close()
+            if journal_bot is not None:
+                await journal_bot.shutdown()
+            if user_store is not None:
+                await user_store.close()
         asyncio.run(_shutdown())
 ```
+
+> **Note:** `post_init` runs inside the event loop created by `run_polling()`, so the `create_async_engine()` in `UserStore.__init__` is bound to the correct loop. No `asyncio.run()` calls outside the loop.
 
 ### 15.2 `_extract_default_storage` Helper
 
